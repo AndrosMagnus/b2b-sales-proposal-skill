@@ -1,0 +1,10 @@
+{
+  "$schema": "https://skills.sh/schema/skills.sh.json",
+  "groupings": [
+    {
+      "title": "Workflow",
+      "description": "The 5-phase B2B sales proposal workflow",
+      "skills": ["b2b-sales-proposal"]
+    }
+  ]
+}

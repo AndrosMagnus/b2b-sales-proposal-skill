@@ -1,0 +1,7 @@
+# Internal working files — not for publishing
+HANDOFF.md
+SKILL-tellus-reference.md
+CLAUDE-snippet-tellus-reference.md
+
+# Claude Code local settings
+.claude/
