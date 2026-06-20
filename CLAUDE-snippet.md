@@ -8,7 +8,9 @@ Replace everything in [ ] with actual values.
 
 ---
 
-## BLOCK 1 — CLAUDE.md (project cockpit)
+## BLOCK 1a — AGENTS.md (project cockpit — primary file)
+
+Used by: Codex, Cursor, GitHub Copilot, Windsurf, Aider, Antigravity, and 25+ other agents natively.
 
 ```markdown
 # [Provider] → [Client]
@@ -23,25 +25,25 @@ Replace everything in [ ] with actual values.
 ## Session Protocol
 
 **On session start:**
-Read this CLAUDE.md → read only the active phase file → confirm state before acting.
+Read AGENTS.md → read only the active phase file → confirm state before acting.
 
 **On phase start:**
 Create phaseN_name.md immediately with status 🔄 In Progress. Do not wait for the phase to complete.
 
 **On completing a subtask within a phase:**
 Update phaseN_name.md with results and current status (what was done, what remains).
-Update "Current Status" in this CLAUDE.md.
+Update "Current Status" in AGENTS.md.
 
-**At ~50% context:**
+**When approaching the context limit (~50% used):**
 Stop. Save phaseN_name.md with everything generated so far, status 🔄 In Progress.
 Update "Current Status" with full detail: what completed, which file has the results, exactly what to do next.
 Update PLAN_[client].md only if a phase fully completed in this session.
-Say: "We're at ~50% context. Files are updated. You can /clear and we'll continue without losing anything."
+Say: "We're approaching the context limit. Files are updated — start a fresh session and we'll continue without losing anything."
 
 **On completing a full phase (gate passed):**
 Finalize phaseN_name.md → change status to ✅ Complete.
 Update PLAN_[client].md → mark ✅ and record file name.
-Update "Current Status" in this CLAUDE.md → next phase and next action.
+Update "Current Status" in AGENTS.md → next phase and next action.
 
 **Phase gate (always before advancing):**
 Ask: "Is this phase's output sufficient to continue, or is there anything to adjust?"
@@ -71,7 +73,17 @@ Only the active phase file. Prior phases: load on demand when needed.
 | `DESIGN.md` | Provider visual system (if applicable) | ⬜ / N/A |
 ```
 
-> **Note for non-Claude agents:** CLAUDE.md is not auto-loaded outside Claude Code. Start each session by telling your agent: "Read `PLAN_[client].md` to see the current state of this deal."
+---
+
+## BLOCK 1b — CLAUDE.md (Claude Code bridge — one line only)
+
+Claude Code auto-loads `CLAUDE.md` at session start. This single line imports `AGENTS.md` so Claude Code uses the same cockpit as every other agent.
+
+```markdown
+@AGENTS.md
+```
+
+If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 
 ---
 
@@ -211,8 +223,8 @@ When the phase is complete and the gate passes, the header changes to:
 
 ## Why this structure works
 
-**CLAUDE.md** is the cockpit — minimal, always auto-loaded by Claude Code at session start. Its only job is to tell the agent where you are and what to do next.
+**AGENTS.md** is the cockpit — minimal, auto-loaded natively by 30+ agents at session start. Its only job is to tell the agent where you are and what to do next. Claude Code uses it via the `@AGENTS.md` import in `CLAUDE.md`.
 
-**PLAN_[client].md** is the full log — phase detail, history, pricing. Loaded on demand when needed.
+**PLAN_[client].md** is the full log — phase detail, history, pricing. Loaded on demand when needed. Also the fallback for any agent that doesn't auto-load a context file: "Read PLAN_[client].md to see the current state of this deal."
 
-**phaseN_name.md** exists from the first moment work on that phase begins. It always reflects the real state: in progress or complete. After any `/clear`, the agent loads it and knows exactly what was done and what comes next — no questions needed.
+**phaseN_name.md** exists from the first moment work on that phase begins. It always reflects the real state: in progress or complete. After starting any new session, the agent loads it and knows exactly what was done and what comes next — no questions needed.

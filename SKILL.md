@@ -91,9 +91,10 @@ If no → re-run setup wizard.
 
 ## DEPENDENCY CHECK
 
-Check which skills are installed:
+Check which skills are installed. Run both commands — skills may be in either location:
 ```
 ls ~/.claude/skills/
+ls ~/.agents/skills/
 ```
 
 For each skill missing from the list, run the install command shown below. Offer to run installs automatically: "Skill X is missing. Install now? (yes/skip)"
@@ -142,9 +143,11 @@ All skills are installed or confirmed available. Then continue to project setup.
 
 ## PROJECT SETUP
 
-Check if the current project directory has a CLAUDE.md containing the proposal cockpit structure (look for a `## Current Status` section and `## Session Protocol` section from this workflow).
+Check if the current project directory has an `AGENTS.md` containing the proposal cockpit structure (look for a `## Current Status` section and `## Session Protocol` section from this workflow).
 
-If the cockpit is missing → create CLAUDE.md (or append to existing one) using this template. Replace [Provider] and [Client] with actual values once known from Phase 0 Block A, or leave as placeholders:
+If the cockpit is missing, create two files:
+
+**1. `AGENTS.md`** — the primary project cockpit. Readable by 30+ agents natively (Codex, Cursor, GitHub Copilot, Windsurf, Aider, Antigravity, and others). Replace [Provider] and [Client] with actual values once known from Phase 0 Block A, or leave as placeholders:
 
 ```markdown
 # [Provider] → [Client]
@@ -159,25 +162,25 @@ If the cockpit is missing → create CLAUDE.md (or append to existing one) using
 ## Session Protocol
 
 **On session start:**
-Read this CLAUDE.md → read only the active phase file → confirm state before acting.
+Read AGENTS.md → read only the active phase file → confirm state before acting.
 
 **On phase start:**
 Create phaseN_name.md immediately with status 🔄 In Progress. Do not wait for the phase to complete.
 
 **On completing a subtask within a phase:**
 Update phaseN_name.md with results and current status (what was done, what remains).
-Update "Current Status" in this CLAUDE.md.
+Update "Current Status" in AGENTS.md.
 
-**At ~50% context:**
+**When approaching the context limit (~50% used):**
 Stop. Save phaseN_name.md with everything generated so far, status 🔄 In Progress.
 Update "Current Status" with full detail: what completed, which file has the results, exactly what to do next.
 Update PLAN_[client].md only if a phase fully completed in this session.
-Say: "We're at ~50% context. Files are updated. You can /clear and we'll continue without losing anything."
+Say: "We're approaching the context limit. Files are updated — start a fresh session and we'll continue without losing anything."
 
 **On completing a full phase (gate passed):**
 Finalize phaseN_name.md → change status to ✅ Complete.
 Update PLAN_[client].md → mark ✅ and record file name.
-Update "Current Status" in this CLAUDE.md → next phase and next action.
+Update "Current Status" in AGENTS.md → next phase and next action.
 
 **Phase gate (always before advancing):**
 Ask: "Is this phase's output sufficient to continue, or is there anything to adjust?"
@@ -207,17 +210,33 @@ Only the active phase file. Prior phases: load on demand when needed.
 | `DESIGN.md` | Provider visual system (if applicable) | ⬜ / N/A |
 ```
 
+**2. `CLAUDE.md`** — one-liner for Claude Code users. Claude Code auto-loads this file at session start, which imports AGENTS.md:
+
+```markdown
+@AGENTS.md
+```
+
+If `CLAUDE.md` already exists in the project with other content, append `@AGENTS.md` at the top rather than replacing it.
+
 ---
 
 ## MULTI-AGENT COMPATIBILITY
 
-The Agent Skills format is multi-agent by design. This skill installs and runs identically in Claude Code, Codex, Cursor, GitHub Copilot, Gemini CLI, Antigravity, and any other agent that supports the SKILL.md format — no special configuration needed.
+The Agent Skills format is multi-agent by design. This skill installs and runs in any compatible agent — Claude Code, Codex, Cursor, GitHub Copilot, Windsurf, Aider, Antigravity, and others — without modification.
 
-**The only Claude Code-specific behavior** is CLAUDE.md auto-loading. Claude Code reads CLAUDE.md automatically at the start of every session, so it always knows the current deal state without being told.
+**Context file strategy:**
+- `AGENTS.md` is the project cockpit and is read natively by 30+ agents (Codex, Cursor, Copilot, Windsurf, Aider, Antigravity, etc.)
+- `CLAUDE.md` contains `@AGENTS.md` so Claude Code auto-imports the same cockpit
+- Single source of truth, zero duplication
 
-**For all other agents:** start each session by telling your agent: "Read `PLAN_[client].md` to see the current state of this deal." The PLAN file is the agent-neutral source of truth. Everything else — the phase files, the workflow, the file conventions — works identically across all agents.
+**Skills installation path:**
+- Claude Code installs skills in `~/.claude/skills/`
+- Many other agents use `~/.agents/skills/`
+- Install commands (`npx skills add`) handle the right path automatically for each agent
 
-**Invoking sub-skills from other agents:** When these instructions say "invoke `/skill-name`", that is Claude Code slash-command syntax. In other agents, the equivalent is: "Use the [skill-name] skill" or "Follow the instructions in [skill-name]." The behavior is the same.
+**Invoking sub-skills:** Throughout these instructions, "invoke `/skill-name`" uses slash-command syntax, which is common across most agents. In agents that use a different invocation syntax (e.g., `@skill-name` or a tool menu), use whatever that agent's equivalent is. The skill logic and output are identical regardless.
+
+**Starting a new session:** When these instructions say "start a fresh session", that means whatever your agent uses to clear context and begin again — `/clear` in Claude Code, a new conversation window, or equivalent. The phase files and AGENTS.md always preserve full state, so nothing is lost.
 
 ---
 
@@ -522,8 +541,8 @@ Update CLAUDE.md and PLAN: Phase 4 ✅.
 
 ## Context rules (all phases)
 
-- End each phase → save phaseN_name.md → update PLAN → update CLAUDE.md → then continue. Never skip the save.
-- On resuming after `/clear`: read `PLAN_[client].md` first. Then read ONLY the active phase file. Do not auto-load all files.
+- End each phase → save phaseN_name.md → update PLAN → update AGENTS.md → then continue. Never skip the save.
+- On resuming after starting a new session: read `PLAN_[client].md` first. Then read ONLY the active phase file. Do not auto-load all files.
 - If context from a prior phase is needed, load it on demand — not preemptively.
 - Pricing in the commercial document: always closed packages. Never per-unit, per-hectare, per-user, or similar formulas.
 - Document language and tone: use [output_language from seller profile].
