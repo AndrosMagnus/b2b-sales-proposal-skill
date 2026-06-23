@@ -122,8 +122,26 @@ Both models can coexist in your seller profile if you use different models per d
 
 ---
 
+## Credits
+
+This workflow orchestrates the following skills — all credit goes to their creators:
+
+| Skill | Author | Repository |
+|---|---|---|
+| `grill-me-codex` | chaseai-yt | [github.com/chaseai-yt/grill-me-codex](https://github.com/chaseai-yt/grill-me-codex) |
+| `grill-me` *(fallback for grill-me-codex)* | Matt Pocock | [github.com/mattpocock/skills](https://github.com/mattpocock/skills) |
+| `account-research` | Anthropic | [github.com/anthropics/knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) |
+| `competitive-intelligence-analyst` | shipshitdev | [github.com/shipshitdev/library](https://github.com/shipshitdev/library) |
+| `influence-psychology` | wondelai | [github.com/wondelai/skills](https://github.com/wondelai/skills) |
+| `conversion-psychology` | mike-coulbourn | [github.com/mike-coulbourn/claude-vibes](https://github.com/mike-coulbourn/claude-vibes) |
+| `draft-outreach` | Anthropic | [github.com/anthropics/knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) |
+| `proposal-writer` | ncklrs | [github.com/ncklrs/startup-os-skills](https://github.com/ncklrs/startup-os-skills) |
+| `competitive-intelligence` | Anthropic | [github.com/anthropics/knowledge-work-plugins](https://github.com/anthropics/knowledge-work-plugins) |
+| `negotiation` | wondelai | [github.com/wondelai/skills](https://github.com/wondelai/skills) |
+| `closing-deals` | clawhub | [skills.volces.com/skills/clawhub/jk-0001](https://skills.volces.com/skills/clawhub/jk-0001) |
+
+---
+
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
-
-Built on top of [grill-me](https://github.com/mattpocock/skills) by Matt Pocock (MIT).
