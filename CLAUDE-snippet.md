@@ -63,7 +63,9 @@ Only the active phase file. Prior phases: load on demand when needed.
 ## File Index
 | File | Content | Status |
 |---|---|---|
-| `PLAN_[client].md` | Phase detail, session history, pricing | always available |
+| `PLAN_[client].md` | Single operational source: phases, strategy, decisions, risks, pricing, history | always available |
+| `PLAN.md` | Raw grill artifact (reference only) | ⬜ |
+| `PLAN-REVIEW-LOG.md` | Codex review rounds log (reference only) | ⬜ |
 | `phase0_intake.md` | Documents read, deal context, pricing calculated | ⬜ |
 | `phase1_intelligence.md` | Client profile, competitors, exclusive advantage | ⬜ |
 | `phase2_strategy.md` | Influence principles, objection map | ⬜ |
@@ -92,7 +94,7 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 ```markdown
 # Plan: [Provider] → [Client]
 
-**Objective:** [one line — what this proposal needs to achieve]
+**Objective:** [one line — expand with the full Goal from the grill after Phase 0 Block C]
 **Status:** Phase 0 ⬜ | Phase 1 ⬜ | Phase 2 ⬜ | Phase 2.5 ⬜/N/A | Phase 3 ⬜ | Phase 4 ⬜
 **Next step:** Phase 0 — Intake
 
@@ -107,7 +109,7 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 - [ ] Document scan complete
 - [ ] Block A: deal context
 - [ ] Block B: business model and pricing calculated
-- [ ] Block C: plan hardening (grill-me-codex / grill-me)
+- [ ] Block C: plan hardening (grill-me-codex / grill-me) + integration into this file
 - [ ] Gate: pricing confirmed ✅
 
 ### Phase 1 — Intelligence ⬜
@@ -152,6 +154,27 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 
 ---
 
+## Approved Strategy
+[Populated in Phase 0 Block C — Approach from grill-me-codex / grill-me]
+
+---
+
+## Key Decisions (locked)
+[Populated in Phase 0 Block C — Key decisions & tradeoffs from grill-me-codex / grill-me]
+[Add any seller decisions made during the process here]
+
+---
+
+## Risks and Open Questions
+[Populated in Phase 0 Block C — Risks / open questions from grill-me-codex / grill-me]
+
+---
+
+## Out of Scope
+[Populated in Phase 0 Block C — Out of scope from grill-me-codex / grill-me]
+
+---
+
 ## Pricing
 | Item | Value |
 |---|---|
@@ -167,10 +190,8 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 
 ---
 
-## Key Decisions (full record)
-| Date | Decision |
-|---|---|
-| [date] | [what was decided] |
+## Reference Documents
+[Key documents available: provider proposals, meeting transcripts, pricing sheets, etc.]
 
 ---
 

@@ -293,6 +293,8 @@ Ask only what could not be extracted from documents:
 
 The answer to #6 determines whether Phase 2.5 (initial outreach) runs or we go straight to Phase 3.
 
+Once provider and client names are confirmed, update the `AGENTS.md` title from `[Provider] → [Client]` to the actual values.
+
 ---
 
 ### Block B — Business model & pricing
@@ -351,7 +353,17 @@ Focus of the interrogation:
 - Does the timing make sense — why now and not later?
 - Who makes the final decision, and what does that specific person care about?
 
-The locked decisions from this step are added directly to `PLAN_[client].md` under "Key Decisions".
+Once grill-me-codex (or grill-me) approves the plan, integrate the full content of `PLAN.md` into `PLAN_[client].md` — nothing omitted:
+
+| Section in `PLAN.md` | Where it goes in `PLAN_[client].md` |
+|---|---|
+| Goal | Expands the **Objective** field |
+| Approach | New section **"## Approved Strategy"** |
+| Key decisions & tradeoffs | Populates **"## Key Decisions (locked)"** |
+| Risks / open questions | New section **"## Risks and Open Questions"** |
+| Out of scope | New section **"## Out of Scope"** |
+
+`PLAN.md` remains as the raw grill artifact (reference). `PLAN_[client].md` is the single operational source from this point forward.
 
 ---
 
@@ -555,7 +567,9 @@ Update CLAUDE.md and PLAN: Phase 4 ✅.
 
 | File | Content |
 |---|---|
-| `PLAN_[client].md` | Master index, phase status, key decisions, session history, pricing |
+| `PLAN_[client].md` | Single operational source: phases, approved strategy, key decisions, risks, out of scope, pricing, session history |
+| `PLAN.md` | Raw grill artifact — Goal, Approach, Key decisions, Risks, Out of scope (reference only) |
+| `PLAN-REVIEW-LOG.md` | Codex adversarial review rounds log (reference only) |
 | `phase0_intake.md` | Documents read, deal context, business model, pricing table |
 | `phase1_intelligence.md` | Client profile, competitors, exclusive advantage |
 | `phase2_strategy.md` | Influence principles, objection map |
