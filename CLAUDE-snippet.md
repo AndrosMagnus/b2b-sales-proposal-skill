@@ -1,8 +1,16 @@
-# CLAUDE-snippet — B2B Sales Proposal
+# CLAUDE-snippet v2.0 — B2B Sales Proposal
 
 Reference templates for the files this workflow creates automatically.
 
 The skill creates these files for you when you run `/b2b-sales-proposal`. Use this file if you need to set up a project manually or understand the structure.
+
+**What's new in v2.0:**
+- **Context budgeting** — every task is split into chunks sized to finish within ~50% of a context window, with a checkpoint after each chunk
+- **Task files** — each task gets its own `.md` with chunk plan, Definition of Done, and verification method, referenced from the PLAN
+- **Results files** — deliverables live in separate `phaseN_results.md` files, never auto-loaded
+- **Verification loop** — every task defines how it will be tested BEFORE work starts, runs the test after, and retries with lessons learned on failure
+- **`LESSONS.md`** — append-only lessons from failed verifications, read at every task start
+- **5-hour usage-limit hook** — pauses work at ~90% of the limit and auto-resumes when it resets (see `HOOKS.md`)
 
 Replace everything in [ ] with actual values.
 
@@ -12,45 +20,70 @@ Replace everything in [ ] with actual values.
 
 Used by: Codex, Cursor, GitHub Copilot, Windsurf, Aider, Antigravity, and 25+ other agents natively.
 
+The cockpit is deliberately small: it tells the agent where you are, what to do next, and the rules of the game. Everything heavy lives in other files, loaded on demand.
+
 ```markdown
 # [Provider] → [Client]
 
 ## Current Status
-**Active phase:** Phase 0 — Intake
+**Active task:** Phase 0 — Intake
+**Active chunk:** — (set when the task is chunked)
 **Last completed:** —
 **Next action:** Run /b2b-sales-proposal to start Phase 0
+**Blocked by:** — (none / waiting on seller / 5-hour usage limit — resumes at [time])
 
 ---
 
 ## Session Protocol
 
 **On session start:**
-Read AGENTS.md → read only the active phase file → confirm state before acting.
+Read AGENTS.md → read the status header of PLAN_[client].md → read ONLY the active task file (phaseN_name.md). Confirm state in one line before acting. Never auto-load prior task or results files — load them on demand only when a specific fact is needed.
 
-**On phase start:**
-Create phaseN_name.md immediately with status 🔄 In Progress. Do not wait for the phase to complete.
+**On task start — chunk before you work:**
+1. Split the task into chunks sized so each chunk, including its file updates, completes within about 50% of a fresh context window. When unsure, cut smaller.
+2. Create phaseN_name.md immediately (status 🔄 In Progress) containing: the chunk list as checkboxes, the Definition of Done, and the verification method (see Verification Protocol) — all BEFORE starting chunk 1.
+3. Reference the task file and its subtasks in PLAN_[client].md.
+4. Read LESSONS.md (it is short) and apply anything relevant to this task.
 
-**On completing a subtask within a phase:**
-Update phaseN_name.md with results and current status (what was done, what remains).
-Update "Current Status" in AGENTS.md.
+**On chunk / subtask complete:**
+Tick the chunk in phaseN_name.md, append what was produced and where it lives, tick the matching subtask in PLAN_[client].md, refresh "Current Status" above.
 
-**When approaching the context limit (~50% used):**
+**At ~50% of the context window used (checkpoint):**
 Stop. Save phaseN_name.md with everything generated so far, status 🔄 In Progress.
-Update "Current Status" with full detail: what completed, which file has the results, exactly what to do next.
-Update PLAN_[client].md only if a phase fully completed in this session.
-Say: "We're approaching the context limit. Files are updated — start a fresh session and we'll continue without losing anything."
+Update "Current Status" with full detail: what completed, which file has the results, the literal next action.
+Update PLAN_[client].md only if a task fully completed in this session.
+Say: "Checkpoint saved — run /clear (or start a fresh session) and we continue with zero loss."
 
-**On completing a full phase (gate passed):**
-Finalize phaseN_name.md → change status to ✅ Complete.
-Update PLAN_[client].md → mark ✅ and record file name.
-Update "Current Status" in AGENTS.md → next phase and next action.
+**On task complete:**
+Run the Verification Protocol below. Only a PASS closes the task:
+Deliverables saved in phaseN_results.md → phaseN_name.md set to ✅ Complete with verification evidence → PLAN_[client].md marked ✅ with both file names → "Current Status" moved to the next task.
 
-**Phase gate (always before advancing):**
-Ask: "Is this phase's output sufficient to continue, or is there anything to adjust?"
+**Task gate (always before advancing):**
+Ask: "Verification passed — [one-line evidence]. Is this output sufficient to continue, or is there anything to adjust?"
 Do not advance until confirmed.
 
-**Do not auto-load previous phase files.**
-Only the active phase file. Prior phases: load on demand when needed.
+---
+
+## Verification Protocol
+
+Every task is verified for QUALITY, not just completion.
+
+1. **Before work:** write into the task file (a) the Definition of Done — specific, checkable criteria — and (b) the verification method — how the output will actually be tested.
+2. **Unknown how to test?** Research it first (web search, docs, comparable examples), record the chosen method in the task file, then start work.
+3. **After work:** RUN the verification — actually execute the checks against the output. Never self-declare success without running them.
+4. **FAIL →** append the cause and the corrective rule to LESSONS.md, then redo the task applying those lessons. After 2 failed retries, stop and present the seller the failure analysis and options.
+5. **PASS →** record the evidence (what was checked, the outcome) in the task file's Verification record, then close the task per the Session Protocol.
+
+---
+
+## Usage-Limit Rule (5-hour limit)
+
+When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you are otherwise told the limit is near):
+- **Mid-task:** finish the current chunk only if it clearly fits; otherwise checkpoint immediately (same steps as the ~50% context checkpoint) and stop.
+- **Between tasks:** do NOT start the next task. Checkpoint and stop.
+- Set "Blocked by" in Current Status to: "5-hour usage limit — resumes automatically at [time]".
+
+The Stop hook schedules an automatic resume when the limit resets (see HOOKS.md). Without hooks installed, resume manually after the reset: open the project and say "continue".
 
 ---
 
@@ -61,18 +94,15 @@ Only the active phase file. Prior phases: load on demand when needed.
 ---
 
 ## File Index
-| File | Content | Status |
+| File | Content | When to load |
 |---|---|---|
-| `PLAN_[client].md` | Single operational source: phases, strategy, decisions, risks, pricing, history | always available |
-| `PLAN.md` | Raw grill artifact (reference only) | ⬜ |
-| `PLAN-REVIEW-LOG.md` | Codex review rounds log (reference only) | ⬜ |
-| `phase0_intake.md` | Documents read, deal context, pricing calculated | ⬜ |
-| `phase1_intelligence.md` | Client profile, competitors, exclusive advantage | ⬜ |
-| `phase2_strategy.md` | Influence principles, objection map | ⬜ |
-| `phase2.5_outreach.md` | Prospecting email + follow-up sequence | ⬜ / N/A |
-| `phase3_proposal.md` | Proposal draft, Word versions, delivery email | ⬜ |
-| `phase4_close.md` | Competitive battlecard, negotiation playbook, close | ⬜ |
-| `DESIGN.md` | Provider visual system (if applicable) | ⬜ / N/A |
+| `PLAN_[client].md` | Master plan: tasks, subtasks, verification status, strategy, pricing, history | Status header every session; full file on demand |
+| `phaseN_name.md` | Per-task file: chunk plan, Definition of Done, verification method + evidence, work log | Active task only |
+| `phaseN_results.md` | Per-task deliverables (emails, drafts, battlecards, pricing tables) | On demand |
+| `LESSONS.md` | One-line lessons from failed verifications | At every task start |
+| `PLAN.md` | Raw grill artifact (reference only) | On demand |
+| `PLAN-REVIEW-LOG.md` | Codex review rounds log (reference only) | On demand |
+| `DESIGN.md` | Provider visual system (if applicable) | Phase 3 only |
 ```
 
 ---
@@ -100,56 +130,68 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 
 ---
 
-## Phases
+## Tasks
 
 ### Phase 0 — Intake ⬜
-> Result: `phase0_intake.md`
+> Task file: `phase0_intake.md` · Results: `phase0_results.md`
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] Document location confirmed
 - [ ] Document scan complete
 - [ ] Block A: deal context
 - [ ] Block B: business model and pricing calculated
 - [ ] Block C: plan hardening (grill-me-codex / grill-me) + integration into this file
-- [ ] Gate: pricing confirmed ✅
+- [ ] Verification run — PASS recorded
+- [ ] Gate: pricing confirmed by seller ✅
 
 ### Phase 1 — Intelligence ⬜
-> Result: `phase1_intelligence.md`
+> Task file: `phase1_intelligence.md` · Results: `phase1_results.md`
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] account-research (or sales:account-research) — client profile
 - [ ] competitive-intelligence-analyst — competitive landscape and exclusive advantage
+- [ ] Verification run — PASS recorded
 - [ ] Gate: client researched + main competitive angle identified ✅
 
 ### Phase 2 — Persuasion Strategy ⬜
-> Result: `phase2_strategy.md`
+> Task file: `phase2_strategy.md` · Results: `phase2_results.md`
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] influence-psychology — 7 principles applied to this client
 - [ ] conversion-psychology — objections mapped and neutralized
+- [ ] Verification run — PASS recorded
 - [ ] Gate: clear strategy + anticipated objections ✅
 
 ### Phase 2.5 — Initial Outreach ⬜ / N/A
-> Result: `phase2.5_outreach.md`
+> Task file: `phase2.5_outreach.md` · Results: `phase2.5_results.md`
 > Run only if no prior relationship with the client
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] draft-outreach (or sales:draft-outreach) — personalized prospecting email
 - [ ] 14-day follow-up sequence
+- [ ] Verification run — PASS recorded
 - [ ] Gate: email sent, waiting for response ✅
 
 ### Phase 3 — Creation ⬜
-> Result: `phase3_proposal.md`
+> Task file: `phase3_proposal.md` · Results: `phase3_results.md`
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] proposal-writer — structure and draft
 - [ ] Word document generated
 - [ ] Seller review — manual edits recorded
 - [ ] draft-outreach (or sales:draft-outreach), warm variant — delivery email
+- [ ] Verification run — PASS recorded
 - [ ] Gate: seller approved the proposal ✅
 
 ### Phase 4 — Close ⬜
-> Result: `phase4_close.md`
+> Task file: `phase4_close.md` · Results: `phase4_results.md`
 > Run when client feedback is received or meeting is scheduled
 
+- [ ] Chunk plan + Definition of Done + verification method written
 - [ ] competitive-intelligence (or sales:competitive-intelligence) — interactive HTML battlecard
 - [ ] negotiation — full negotiation playbook
 - [ ] closing-deals — post-meeting close techniques
+- [ ] Verification run — PASS recorded
 - [ ] Gate: meeting done + feedback captured ✅
 
 ---
@@ -196,56 +238,135 @@ If `CLAUDE.md` already exists with other content, add `@AGENTS.md` at the top.
 ---
 
 ## Session History
-| Date | What was done | Files updated |
-|---|---|---|
-| [date] | Phase 0 complete | phase0_intake.md ✅ |
+| Date | What was done | Files updated | Verification |
+|---|---|---|---|
+| [date] | Phase 0 complete | phase0_intake.md ✅ phase0_results.md | PASS |
 ```
 
 ---
 
-## BLOCK 3 — phaseN_name.md structure
+## BLOCK 3 — phaseN_name.md (task file)
 
-Each phase file is created at the **start** of the phase, not when it finishes.
+Each task file is created at the **start** of the task, not when it finishes — with the chunk plan, Definition of Done, and verification method written BEFORE any work happens.
 
 ```markdown
 # Phase N — [Name]
-**Status:** 🔄 In Progress — completed: [subtask] | pending: [subtask]
+**Status:** 🔄 In Progress — completed: [chunk] | pending: [chunk]
 **Last updated:** [date]
+**Results file:** phaseN_results.md
 
 ---
 
-[results of completed subtasks so far]
+## Spec
+
+**Definition of Done:**
+- [specific, checkable criterion 1]
+- [specific, checkable criterion 2]
+
+**Verification method:**
+[How the output will actually be tested — commands to run, checklist to apply, review criteria.
+If you don't know how to test this kind of output, research it first and record the chosen method here before starting work.]
+
+**Lessons applied from LESSONS.md:**
+- [relevant lesson, or "none apply"]
+
+---
+
+## Chunk plan (each chunk ≈ fits in ≤50% of a context window)
+- [ ] Chunk 1 — [scope]
+- [ ] Chunk 2 — [scope]
+
+---
+
+## Work log
+| Date | Chunk | What was produced | Where it lives |
+|---|---|---|---|
+| [date] | 1 | [output summary] | phaseN_results.md § [section] |
+
+---
+
+## Verification record
+**Run:** [date] — **Result:** PASS / FAIL
+**Evidence:** [what was checked, how, and the outcome — never blank on a ✅ task]
+**Retries:** [0 / 1 / 2] — lessons recorded in LESSONS.md: [yes / n/a]
 ```
 
-When the phase is complete and the gate passes, the header changes to:
+When the task is complete, verification PASSED, and the gate confirmed, the header changes to:
 
 ```markdown
 # Phase N — [Name]
-**Status:** ✅ Complete
+**Status:** ✅ Complete — verification PASS ([date])
 **Last updated:** [date]
+**Results file:** phaseN_results.md
+```
 
 ---
 
-[full results]
+## BLOCK 4 — phaseN_results.md (results file)
+
+The deliverables live here — separated from process so they stay clean, copy-ready, and are never auto-loaded.
+
+```markdown
+# Phase N — [Name] — Results
+**Produced by:** phaseN_name.md
+**Verification:** PASS ([date])
+
+---
+
+[the actual deliverables: emails, proposal drafts, battlecards, pricing tables, research summaries]
+```
+
+---
+
+## BLOCK 5 — LESSONS.md (lessons learned)
+
+Append-only. One line per lesson. Read at every task start — it must stay short enough to always be cheap to load.
+
+```markdown
+# Lessons Learned
+<!-- Append-only. One line per lesson. Read at every task start. -->
+
+| Date | Task | What failed | Rule going forward |
+|---|---|---|---|
+| [date] | Phase 3 | Proposal exceeded 8-page standing rule | Check standing rules against DoD before drafting |
 ```
 
 ---
 
 ## Update rules — summary
 
-| Moment | phaseN_name.md | PLAN_[client].md | CLAUDE.md |
-|---|---|---|---|
-| Phase starts | Create with 🔄 | — | Update active phase |
-| Subtask completes | Update results + 🔄 | — | Update last completed |
-| ~50% context | Save with 🔄 | Only if a phase completed | Always |
-| Phase complete + gate | Change to ✅ | Mark ✅ + record file | Update next phase |
+| Moment | phaseN_name.md | phaseN_results.md | PLAN_[client].md | AGENTS.md | LESSONS.md |
+|---|---|---|---|---|---|
+| Task starts | Create with 🔄 + spec + chunks | — | Reference task file | Update active task | Read |
+| Chunk completes | Tick chunk + log | Append output | Tick subtask | Update last completed | — |
+| ~50% context | Save with 🔄 | Save | Only if a task completed | Always | — |
+| Verification FAIL | Record FAIL + retry | — | — | — | Append lesson |
+| Task complete + PASS + gate | Change to ✅ + evidence | Finalize | Mark ✅ + record files | Update next task | — |
+| ~90% of 5-hour limit | Save with 🔄 | Save | Only if a task completed | Always + "Blocked by" | — |
+
+---
+
+## Usage-limit hook (5-hour limit)
+
+The pause-at-90% / auto-resume-at-reset behavior is enforced by Claude Code hooks shipped in this repo:
+
+- `hooks/usage-limit-guard.sh` — estimates current 5-hour-block usage, blocks new tool calls at the threshold (allowing checkpoint writes), and schedules the automatic resume
+- `hooks/settings.json.example` — the hooks configuration to merge into `.claude/settings.json`
+
+Full setup, configuration, and honest caveats: see **`HOOKS.md`**.
 
 ---
 
 ## Why this structure works
 
-**AGENTS.md** is the cockpit — minimal, auto-loaded natively by 30+ agents at session start. Its only job is to tell the agent where you are and what to do next. Claude Code uses it via the `@AGENTS.md` import in `CLAUDE.md`.
+**AGENTS.md** is the cockpit — minimal, auto-loaded natively by 30+ agents at session start. Its only job is to tell the agent where you are, what to do next, and the rules (chunking, verification, limits). Claude Code uses it via the `@AGENTS.md` import in `CLAUDE.md`.
 
-**PLAN_[client].md** is the full log — phase detail, history, pricing. Loaded on demand when needed. Also the fallback for any agent that doesn't auto-load a context file: "Read PLAN_[client].md to see the current state of this deal."
+**PLAN_[client].md** is the master index — every task and subtask with its checkbox, verification status, strategy, pricing, history. The status header is read every session; the full file only on demand.
 
-**phaseN_name.md** exists from the first moment work on that phase begins. It always reflects the real state: in progress or complete. After starting any new session, the agent loads it and knows exactly what was done and what comes next — no questions needed.
+**phaseN_name.md** (task file) exists from the first moment work begins, with the chunk plan and the test written before the work. After any `/clear`, the agent loads only this file and knows exactly what was done, what comes next, and how the output will be judged.
+
+**phaseN_results.md** keeps deliverables clean and out of the context window until actually needed.
+
+**LESSONS.md** turns failed verifications into permanent rules, so quality compounds across tasks and across deals.
+
+The net effect: context is spent on work, not on re-reading history — and nothing is lost at `/clear`, at the ~50% checkpoint, or at the 5-hour usage limit.

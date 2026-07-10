@@ -3,7 +3,7 @@
 > A complete B2B sales proposal workflow skill for AI coding agents — from deal intake to signed contract.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/AndrosMagnus/b2b-sales-proposal-skill/releases)
+[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)](https://github.com/AndrosMagnus/b2b-sales-proposal-skill/releases)
 [![Agent Skills](https://img.shields.io/badge/Agent%20Skills-compatible-green.svg)](https://agentskills.dev)
 
 ---
@@ -22,6 +22,12 @@
 | **4 — Close** | Build a competitive battlecard, negotiation playbook, and close script |
 
 Each phase saves its output to a dedicated file. State is fully preserved across sessions — you can stop, start a fresh session, and pick up exactly where you left off.
+
+**v2.0 adds a full task-management layer:**
+- **Context budgeting** — every task is chunked to fit ~50% of a context window, with a checkpoint at every chunk boundary
+- **Task + results files** — each phase gets a task file (chunk plan, Definition of Done, verification method, work log) and a separate results file with the clean deliverables
+- **Verification loop** — every task defines how its output will be tested *before* work starts, runs the test after, and on failure retries with lessons recorded in `LESSONS.md`
+- **5-hour usage-limit guard** — optional Claude Code hooks that pause work at ~90% of the limit and auto-resume when it resets (see [HOOKS.md](HOOKS.md))
 
 ---
 
@@ -74,9 +80,13 @@ The workflow creates two context files at the start of every deal:
 
 **`CLAUDE.md`** — one line: `@AGENTS.md`. Claude Code auto-loads this at session start, importing the cockpit automatically.
 
-**`PLAN_[client].md`** — the single operational source for the deal. After Phase 0, it contains the full approved strategy, key decisions, risks, out-of-scope boundaries, pricing, and session history. This is the file to read first when resuming after any context reset.
+**`PLAN_[client].md`** — the single operational source for the deal. After Phase 0, it contains every task and subtask with checkboxes and verification status, the full approved strategy, key decisions, risks, out-of-scope boundaries, pricing, and session history. This is the file to read first when resuming after any context reset.
 
-After any session reset, the agent reads `AGENTS.md` → `PLAN_[client].md` and has everything needed to continue without questions.
+**`phaseN_name.md` / `phaseN_results.md`** — per-task files: the task file holds the chunk plan, Definition of Done, verification method and evidence; the results file holds the clean deliverables and is never auto-loaded.
+
+**`LESSONS.md`** — append-only lessons from failed verifications, read at every task start so quality compounds.
+
+After any session reset (or `/clear`), the agent reads `AGENTS.md` → the PLAN status header → only the active task file, and has everything needed to continue without questions — context is spent on work, not on re-reading history.
 
 ---
 
@@ -107,18 +117,29 @@ Both models can coexist in your seller profile if you use different models per d
 
 | File | Content |
 |---|---|
-| `AGENTS.md` | Project cockpit — active phase, session protocol, file index |
+| `AGENTS.md` | Project cockpit — current status, session/verification/usage-limit protocols, file index |
 | `CLAUDE.md` | Claude Code bridge — one line: `@AGENTS.md` |
-| `PLAN_[client].md` | Single operational source: strategy, decisions, risks, pricing, history |
+| `PLAN_[client].md` | Single operational source: tasks + subtasks + verification status, strategy, decisions, risks, pricing, history |
+| `LESSONS.md` | Append-only lessons learned from failed verifications |
 | `PLAN.md` | Raw grill artifact (reference) |
 | `PLAN-REVIEW-LOG.md` | Codex adversarial review log (reference) |
-| `phase0_intake.md` | Documents read, deal summary, pricing table |
-| `phase1_intelligence.md` | Client profile, competitive landscape, exclusive advantage |
-| `phase2_strategy.md` | Influence principles applied, objection map |
-| `phase2.5_outreach.md` | Prospecting email + 14-day follow-up sequence |
-| `phase3_proposal.md` | Proposal draft, Word versions, delivery email |
-| `phase4_close.md` | Battlecard, negotiation playbook, close techniques |
+| `phase0_intake.md` + `phase0_results.md` | Documents read, deal summary, pricing table |
+| `phase1_intelligence.md` + `phase1_results.md` | Client profile, competitive landscape, exclusive advantage |
+| `phase2_strategy.md` + `phase2_results.md` | Influence principles applied, objection map |
+| `phase2.5_outreach.md` + `phase2.5_results.md` | Prospecting email + 14-day follow-up sequence |
+| `phase3_proposal.md` + `phase3_results.md` | Proposal draft, Word versions, delivery email |
+| `phase4_close.md` + `phase4_results.md` | Battlecard, negotiation playbook, close techniques |
 | `DESIGN.md` | Provider visual system, if used for Word generation |
+
+Task files (`phaseN_name.md`) hold the process — chunk plan, Definition of Done, verification record. Results files (`phaseN_results.md`) hold the clean deliverables.
+
+---
+
+## 5-hour usage-limit guard (optional, Claude Code)
+
+`hooks/usage-limit-guard.sh` + `hooks/settings.json.example` implement the cockpit's Usage-Limit Rule: at ~90% of the 5-hour usage limit the agent checkpoints all state files and stops (finishing the current chunk only if it fits), and a background process automatically resumes the session with `claude --continue` when the limit resets.
+
+Setup, calibration, and caveats: **[HOOKS.md](HOOKS.md)**.
 
 ---
 

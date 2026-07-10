@@ -4,7 +4,7 @@ description: Complete B2B sales proposal workflow — 5 phases from deal intake 
 license: MIT
 metadata:
   author: AndrosMagnus
-  version: "1.0.0"
+  version: "2.0.0"
 ---
 
 # B2B Sales Proposal
@@ -20,7 +20,8 @@ Run these checks in order before starting Phase 0:
 1. **Seller profile** → load if exists, run setup wizard if missing
 2. **Dependencies** → verify required skills are installed; install or guide if any are missing
 3. **Project CLAUDE.md** → create or update cockpit structure if missing
-4. Begin Phase 0
+4. **Usage-limit hook (Claude Code only, optional)** → if `.claude/hooks/usage-limit-guard.sh` is not present, mention once: "Optional: this workflow ships a 5-hour usage-limit guard that pauses at ~90% and auto-resumes at reset — see HOOKS.md in the skill repo to install it." Do not block on it.
+5. Begin Phase 0
 
 ---
 
@@ -145,7 +146,7 @@ All skills are installed or confirmed available. Then continue to project setup.
 
 Check if the current project directory has an `AGENTS.md` containing the proposal cockpit structure (look for a `## Current Status` section and `## Session Protocol` section from this workflow).
 
-If the cockpit is missing, create two files:
+If the cockpit is missing, create these files:
 
 **1. `AGENTS.md`** — the primary project cockpit. Readable by 30+ agents natively (Codex, Cursor, GitHub Copilot, Windsurf, Aider, Antigravity, and others). Replace [Provider] and [Client] with actual values once known from Phase 0 Block A, or leave as placeholders:
 
@@ -153,41 +154,64 @@ If the cockpit is missing, create two files:
 # [Provider] → [Client]
 
 ## Current Status
-**Active phase:** Phase 0 — Intake
+**Active task:** Phase 0 — Intake
+**Active chunk:** — (set when the task is chunked)
 **Last completed:** —
 **Next action:** Run /b2b-sales-proposal to start Phase 0
+**Blocked by:** — (none / waiting on seller / 5-hour usage limit — resumes at [time])
 
 ---
 
 ## Session Protocol
 
 **On session start:**
-Read AGENTS.md → read only the active phase file → confirm state before acting.
+Read AGENTS.md → read the status header of PLAN_[client].md → read ONLY the active task file (phaseN_name.md). Confirm state in one line before acting. Never auto-load prior task or results files — load them on demand only when a specific fact is needed.
 
-**On phase start:**
-Create phaseN_name.md immediately with status 🔄 In Progress. Do not wait for the phase to complete.
+**On task start — chunk before you work:**
+1. Split the task into chunks sized so each chunk, including its file updates, completes within about 50% of a fresh context window. When unsure, cut smaller.
+2. Create phaseN_name.md immediately (status 🔄 In Progress) containing: the chunk list as checkboxes, the Definition of Done, and the verification method (see Verification Protocol) — all BEFORE starting chunk 1.
+3. Reference the task file and its subtasks in PLAN_[client].md.
+4. Read LESSONS.md (it is short) and apply anything relevant to this task.
 
-**On completing a subtask within a phase:**
-Update phaseN_name.md with results and current status (what was done, what remains).
-Update "Current Status" in AGENTS.md.
+**On chunk / subtask complete:**
+Tick the chunk in phaseN_name.md, append what was produced and where it lives, tick the matching subtask in PLAN_[client].md, refresh "Current Status" above.
 
-**When approaching the context limit (~50% used):**
+**At ~50% of the context window used (checkpoint):**
 Stop. Save phaseN_name.md with everything generated so far, status 🔄 In Progress.
-Update "Current Status" with full detail: what completed, which file has the results, exactly what to do next.
-Update PLAN_[client].md only if a phase fully completed in this session.
-Say: "We're approaching the context limit. Files are updated — start a fresh session and we'll continue without losing anything."
+Update "Current Status" with full detail: what completed, which file has the results, the literal next action.
+Update PLAN_[client].md only if a task fully completed in this session.
+Say: "Checkpoint saved — run /clear (or start a fresh session) and we continue with zero loss."
 
-**On completing a full phase (gate passed):**
-Finalize phaseN_name.md → change status to ✅ Complete.
-Update PLAN_[client].md → mark ✅ and record file name.
-Update "Current Status" in AGENTS.md → next phase and next action.
+**On task complete:**
+Run the Verification Protocol below. Only a PASS closes the task:
+Deliverables saved in phaseN_results.md → phaseN_name.md set to ✅ Complete with verification evidence → PLAN_[client].md marked ✅ with both file names → "Current Status" moved to the next task.
 
-**Phase gate (always before advancing):**
-Ask: "Is this phase's output sufficient to continue, or is there anything to adjust?"
+**Task gate (always before advancing):**
+Ask: "Verification passed — [one-line evidence]. Is this output sufficient to continue, or is there anything to adjust?"
 Do not advance until confirmed.
 
-**Do not auto-load previous phase files.**
-Only the active phase file. Prior phases: load on demand when needed.
+---
+
+## Verification Protocol
+
+Every task is verified for QUALITY, not just completion.
+
+1. **Before work:** write into the task file (a) the Definition of Done — specific, checkable criteria — and (b) the verification method — how the output will actually be tested.
+2. **Unknown how to test?** Research it first (web search, docs, comparable examples), record the chosen method in the task file, then start work.
+3. **After work:** RUN the verification — actually execute the checks against the output. Never self-declare success without running them.
+4. **FAIL →** append the cause and the corrective rule to LESSONS.md, then redo the task applying those lessons. After 2 failed retries, stop and present the seller the failure analysis and options.
+5. **PASS →** record the evidence (what was checked, the outcome) in the task file's Verification record, then close the task per the Session Protocol.
+
+---
+
+## Usage-Limit Rule (5-hour limit)
+
+When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you are otherwise told the limit is near):
+- **Mid-task:** finish the current chunk only if it clearly fits; otherwise checkpoint immediately (same steps as the ~50% context checkpoint) and stop.
+- **Between tasks:** do NOT start the next task. Checkpoint and stop.
+- Set "Blocked by" in Current Status to: "5-hour usage limit — resumes automatically at [time]".
+
+The Stop hook schedules an automatic resume when the limit resets (see HOOKS.md). Without hooks installed, resume manually after the reset: open the project and say "continue".
 
 ---
 
@@ -198,17 +222,26 @@ Only the active phase file. Prior phases: load on demand when needed.
 ---
 
 ## File Index
-| File | Content | Status |
+| File | Content | When to load |
 |---|---|---|
-| `PLAN_[client].md` | Phase detail, session history, pricing | always available |
-| `phase0_intake.md` | Documents read, deal context, pricing calculated | ⬜ |
-| `phase1_intelligence.md` | Client profile, competitors, exclusive advantage | ⬜ |
-| `phase2_strategy.md` | Influence principles, objection map | ⬜ |
-| `phase2.5_outreach.md` | Prospecting email + follow-up sequence | ⬜ / N/A |
-| `phase3_proposal.md` | Proposal draft, Word versions, delivery email | ⬜ |
-| `phase4_close.md` | Competitive battlecard, negotiation playbook, close | ⬜ |
-| `DESIGN.md` | Provider visual system (if applicable) | ⬜ / N/A |
+| `PLAN_[client].md` | Master plan: tasks, subtasks, verification status, strategy, pricing, history | Status header every session; full file on demand |
+| `phaseN_name.md` | Per-task file: chunk plan, Definition of Done, verification method + evidence, work log | Active task only |
+| `phaseN_results.md` | Per-task deliverables (emails, drafts, battlecards, pricing tables) | On demand |
+| `LESSONS.md` | One-line lessons from failed verifications | At every task start |
+| `DESIGN.md` | Provider visual system (if applicable) | Phase 3 only |
 ```
+
+**Also create `LESSONS.md`** (append-only lessons file, read at every task start):
+
+```markdown
+# Lessons Learned
+<!-- Append-only. One line per lesson. Read at every task start. -->
+
+| Date | Task | What failed | Rule going forward |
+|---|---|---|---|
+```
+
+See `CLAUDE-snippet.md` in the skill repo for the full templates of the task file (`phaseN_name.md`) and results file (`phaseN_results.md`).
 
 **2. `CLAUDE.md`** — one-liner for Claude Code users. Claude Code auto-loads this file at session start, which imports AGENTS.md:
 
@@ -244,7 +277,7 @@ The Agent Skills format is multi-agent by design. This skill installs and runs i
 
 Say: "Starting Phase 0 — Intake."
 
-Create `phase0_intake.md` immediately with status 🔄 In Progress.
+Create `phase0_intake.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant.
 
 ### Document location check
 
@@ -369,7 +402,7 @@ Once grill-me-codex (or grill-me) approves the plan, integrate the full content 
 
 ### Phase 0 output
 
-Create two files:
+Create these files:
 
 **`PLAN_[client].md`** — master project index:
 
@@ -380,15 +413,17 @@ Create two files:
 **Status:** Phase 0 ✅ | Phase 1 ⬜ | Phase 2 ⬜ | [Phase 2.5 ⬜] | Phase 3 ⬜ | Phase 4 ⬜
 **Next step:** Phase 1 — Intelligence
 
-## Phases and result files
-| Phase | File | Status |
-|---|---|---|
-| Phase 0 — Intake | phase0_intake.md | ✅ |
-| Phase 1 — Intelligence | — | ⬜ |
-| Phase 2 — Strategy | — | ⬜ |
-| Phase 2.5 — Initial Outreach | — | ⬜ / N/A |
-| Phase 3 — Creation | — | ⬜ |
-| Phase 4 — Close | — | ⬜ |
+## Tasks
+| Task | Task file | Results file | Verification | Status |
+|---|---|---|---|---|
+| Phase 0 — Intake | phase0_intake.md | phase0_results.md | PASS | ✅ |
+| Phase 1 — Intelligence | — | — | — | ⬜ |
+| Phase 2 — Strategy | — | — | — | ⬜ |
+| Phase 2.5 — Initial Outreach | — | — | — | ⬜ / N/A |
+| Phase 3 — Creation | — | — | — | ⬜ |
+| Phase 4 — Close | — | — | — | ⬜ |
+
+(Expand each task with its subtask checkboxes as it starts — see the full PLAN template in CLAUDE-snippet.md. Tick subtasks the moment they complete.)
 
 ## Key Decisions (locked)
 [seller decisions + grill-me-codex / grill-me output]
@@ -412,12 +447,18 @@ Create two files:
 | [today] | Phase 0 complete |
 ```
 
-**`phase0_intake.md`** — include: documents found and read, deal summary, business model, calculated pricing table, known pain points, client relationship status.
+**`phase0_intake.md`** — the task file: chunk plan, Definition of Done, verification method + record, work log.
 
-Update CLAUDE.md: mark Phase 0 ✅, set active phase to Phase 1.
-Mark `phase0_intake.md` as ✅ Complete and update PLAN before continuing.
+**`phase0_results.md`** — the deliverables: documents found and read, deal summary, business model, calculated pricing table, known pain points, client relationship status.
 
-**Phase 0 gate:** "Is the deal context clear and the pricing confirmed? Ready to move to Phase 1?"
+**Run the Phase 0 verification** before closing. Suggested checks:
+- Recompute the pricing independently from the raw inputs — result must match the presented table exactly
+- Every Block A and Block B question is answered or explicitly marked N/A
+- The grill output is fully integrated into PLAN_[client].md (Approved Strategy, Key Decisions, Risks, Out of Scope populated — no placeholders left)
+
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → mark `phase0_intake.md` ✅ Complete with evidence, update PLAN and AGENTS.md: Phase 0 ✅, active task Phase 1.
+
+**Phase 0 gate:** "Verification passed — [evidence]. Is the deal context clear and the pricing confirmed? Ready to move to Phase 1?"
 
 ---
 
@@ -425,7 +466,7 @@ Mark `phase0_intake.md` as ✅ Complete and update PLAN before continuing.
 
 Say: "Starting Phase 1 — Intelligence."
 
-Create `phase1_intelligence.md` immediately with status 🔄 In Progress.
+Create `phase1_intelligence.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant.
 
 Invoke in sequence:
 
@@ -433,10 +474,14 @@ Invoke in sequence:
 
 2. Invoke `/competitive-intelligence-analyst` — map the provider's competitive landscape in this market: who else could offer the client the same thing, what is the exclusive advantage that no one else can replicate. This analysis feeds directly into the proposal's central argument. Update `phase1_intelligence.md` when complete.
 
-Finalize `phase1_intelligence.md` as ✅ Complete.
-Update CLAUDE.md and PLAN: Phase 1 ✅ + file name.
+**Run the Phase 1 verification** before closing. Suggested checks:
+- Every factual claim about the client has a source (URL or document) recorded next to it
+- The "exclusive advantage" is genuinely exclusive: name each competitor from the landscape and state why they cannot replicate it
+- No generic filler — every finding is specific to this client and this deal
 
-**Phase 1 gate:** "Is the client profile solid and the main competitive angle clear? Ready for Phase 2?"
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → save deliverables to `phase1_results.md`, mark `phase1_intelligence.md` ✅ Complete with evidence, update AGENTS.md and PLAN: Phase 1 ✅ + file names.
+
+**Phase 1 gate:** "Verification passed — [evidence]. Is the client profile solid and the main competitive angle clear? Ready for Phase 2?"
 
 ---
 
@@ -444,7 +489,7 @@ Update CLAUDE.md and PLAN: Phase 1 ✅ + file name.
 
 Say: "Starting Phase 2 — Persuasion Strategy."
 
-Create `phase2_strategy.md` immediately with status 🔄 In Progress.
+Create `phase2_strategy.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant.
 
 Invoke in sequence:
 
@@ -452,10 +497,14 @@ Invoke in sequence:
 
 2. Invoke `/conversion-psychology` — map the likely objections (price, timing, ROI, internal alternatives, status quo) and design how to neutralize each in the document before they surface. Update `phase2_strategy.md` when complete.
 
-Finalize `phase2_strategy.md` as ✅ Complete.
-Update CLAUDE.md and PLAN: Phase 2 ✅.
+**Run the Phase 2 verification** before closing. Suggested checks:
+- Each influence principle cites a concrete Phase 1 fact it leverages — no generic psychology advice
+- Every likely objection (price, timing, ROI, internal alternatives, status quo) has a specific neutralization AND a note on where it will land in the proposal
+- The strategy is consistent with the locked Key Decisions in PLAN_[client].md
 
-**Phase 2 gate:** "Is the persuasion strategy clear and objections mapped? Ready to continue?"
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → save deliverables to `phase2_results.md`, mark `phase2_strategy.md` ✅ Complete with evidence, update AGENTS.md and PLAN: Phase 2 ✅.
+
+**Phase 2 gate:** "Verification passed — [evidence]. Is the persuasion strategy clear and objections mapped? Ready to continue?"
 
 ---
 
@@ -466,7 +515,7 @@ If relationship is established (status a) → skip directly to Phase 3.
 
 Say: "Starting Phase 2.5 — Initial Outreach."
 
-Create `phase2.5_outreach.md` immediately with status 🔄 In Progress.
+Create `phase2.5_outreach.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant.
 
 Invoke `/draft-outreach` (or `/sales:draft-outreach` if using the Cowork plugin) with Phase 1 and Phase 2 context:
 - Phase 1 intelligence provides the personalized hook (recent news, market trigger, competitor move, specific initiative)
@@ -474,14 +523,18 @@ Invoke `/draft-outreach` (or `/sales:draft-outreach` if using the Cowork plugin)
 - The email must be short, with a low-commitment CTA ("15 minutes to explore if this is relevant?")
 - Include a follow-up sequence for the next 14 days if no response is received
 
-Output: prospecting email + follow-up sequence. Save in `phase2.5_outreach.md`.
+Output: prospecting email + follow-up sequence. Save in `phase2.5_results.md`, log the process in `phase2.5_outreach.md`.
+
+**Run the Phase 2.5 verification** before closing. Suggested checks:
+- Email is short (aim under ~150 words), plain text, one low-commitment CTA
+- The hook references a verifiable, client-specific fact from Phase 1 — not a generic opener
+- Follow-up sequence covers 14 days with coherent spacing and escalating angles, no repeated message
+
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → mark `phase2.5_outreach.md` ✅ Complete with evidence, update AGENTS.md and PLAN: Phase 2.5 ✅.
 
 **After securing the meeting:** collect feedback and any new information from the call before continuing to Phase 3.
 
-Finalize `phase2.5_outreach.md` as ✅ Complete.
-Update CLAUDE.md and PLAN: Phase 2.5 ✅.
-
-**Phase 2.5 gate:** "Was the meeting secured? Any new information from the call to factor into the proposal?"
+**Phase 2.5 gate:** "Verification passed — [evidence]. Was the meeting secured? Any new information from the call to factor into the proposal?"
 
 ---
 
@@ -489,7 +542,7 @@ Update CLAUDE.md and PLAN: Phase 2.5 ✅.
 
 Say: "Starting Phase 3 — Creation."
 
-Create `phase3_proposal.md` immediately with status 🔄 In Progress.
+Create `phase3_proposal.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant. (Phase 3 is usually the largest task — chunk it so drafting, Word generation, and the delivery email each fit comfortably within ~50% of a context window.)
 
 **Step 3.1 — Draft the proposal:**
 
@@ -517,14 +570,19 @@ Invoke `/draft-outreach` (or `/sales:draft-outreach` if using the Cowork plugin)
 - Clear CTA to review the document together
 - Plain text only — no markdown, no HTML, no bullet points
 
-Record all Word versions generated and any manual edits made by the seller in `phase3_proposal.md`.
+Save the proposal draft, delivery email, and Word version history in `phase3_results.md`; record process and seller's manual edits in `phase3_proposal.md`.
 
 > **Optional:** Invoke `/create-an-asset` (or `/sales:create-an-asset`) if the deal requires an additional visual asset (personalized landing page, HTML one-pager, workflow demo). Not part of the standard flow — only if the seller decides it adds value for this specific deal.
 
-Finalize `phase3_proposal.md` as ✅ Complete.
-Update CLAUDE.md and PLAN: Phase 3 ✅.
+**Run the Phase 3 verification** before closing. Suggested checks:
+- Open the generated Word document and confirm it renders without errors (if you don't know how to inspect a .docx programmatically, research it first — e.g. python-docx — and record the method)
+- Pricing in the document matches the PLAN_[client].md pricing table exactly — closed packages only, no per-unit formulas anywhere
+- Document language is [output_language] throughout; every standing rule from the seller profile passes; no template placeholders remain
+- Each mapped objection from Phase 2 is actually neutralized somewhere in the document
 
-**Phase 3 gate:** "Is the proposal approved and ready to send?"
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → mark `phase3_proposal.md` ✅ Complete with evidence, update AGENTS.md and PLAN: Phase 3 ✅.
+
+**Phase 3 gate:** "Verification passed — [evidence]. Is the proposal approved and ready to send?"
 
 ---
 
@@ -534,7 +592,7 @@ Run only when client feedback is received or a meeting is scheduled.
 
 Say: "Starting Phase 4 — Close."
 
-Create `phase4_close.md` immediately with status 🔄 In Progress.
+Create `phase4_close.md` immediately with status 🔄 In Progress and its Spec — chunk plan, Definition of Done, verification method — per the Session Protocol. Read LESSONS.md and apply anything relevant.
 
 Invoke in sequence:
 
@@ -544,18 +602,25 @@ Invoke in sequence:
 
 3. Invoke `/closing-deals` — post-meeting close techniques based on the feedback received from this specific client. Update `phase4_close.md` when complete.
 
-Finalize `phase4_close.md` as ✅ Complete.
-Update CLAUDE.md and PLAN: Phase 4 ✅.
+**Run the Phase 4 verification** before closing. Suggested checks:
+- Open the HTML battlecard in a browser (or render-check it) — it loads, and covers every competitor identified in Phase 1
+- Negotiation playbook numbers (Ackerman ladder, anchors) are derived from the actual final price in PLAN_[client].md
+- Close techniques reference the actual feedback captured from this client, not generic scripts
 
-**Phase 4 gate:** "Meeting done. Anything else to close the deal?"
+FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol. PASS → save deliverables to `phase4_results.md`, mark `phase4_close.md` ✅ Complete with evidence, update AGENTS.md and PLAN: Phase 4 ✅.
+
+**Phase 4 gate:** "Verification passed — [evidence]. Meeting done. Anything else to close the deal?"
 
 ---
 
 ## Context rules (all phases)
 
-- End each phase → save phaseN_name.md → update PLAN → update AGENTS.md → then continue. Never skip the save.
-- On resuming after starting a new session: read `PLAN_[client].md` first. Then read ONLY the active phase file. Do not auto-load all files.
+- **Chunk first:** at every task start, split the work into chunks that each finish within ~50% of a fresh context window. Checkpoint (save all state files) at each chunk boundary and whenever context passes ~50% — then invite the seller to `/clear` and continue.
+- **Verify always:** no task closes without running its verification method and recording PASS evidence. FAIL → LESSONS.md → redo with lessons applied (max 2 retries, then escalate to the seller).
+- End each phase → save phaseN_name.md + phaseN_results.md → update PLAN → update AGENTS.md → then continue. Never skip the save.
+- On resuming after starting a new session: read `AGENTS.md`, the status header of `PLAN_[client].md`, then ONLY the active task file. Do not auto-load all files.
 - If context from a prior phase is needed, load it on demand — not preemptively.
+- **5-hour usage limit:** at ~90% (hook warning or otherwise), don't start new tasks; finish the current chunk only if it clearly fits, checkpoint, set "Blocked by" in AGENTS.md, and stop. Auto-resume is handled by the Stop hook (HOOKS.md) or manually after reset.
 - Pricing in the commercial document: always closed packages. Never per-unit, per-hectare, per-user, or similar formulas.
 - Document language and tone: use [output_language from seller profile].
 - Apply [standing_rules from seller profile] to all output documents.
@@ -570,10 +635,13 @@ Update CLAUDE.md and PLAN: Phase 4 ✅.
 | `PLAN_[client].md` | Single operational source: phases, approved strategy, key decisions, risks, out of scope, pricing, session history |
 | `PLAN.md` | Raw grill artifact — Goal, Approach, Key decisions, Risks, Out of scope (reference only) |
 | `PLAN-REVIEW-LOG.md` | Codex adversarial review rounds log (reference only) |
-| `phase0_intake.md` | Documents read, deal context, business model, pricing table |
-| `phase1_intelligence.md` | Client profile, competitors, exclusive advantage |
-| `phase2_strategy.md` | Influence principles, objection map |
-| `phase2.5_outreach.md` | Prospecting email + follow-up sequence (if applicable) |
-| `phase3_proposal.md` | Proposal draft, Word version history, delivery email |
-| `phase4_close.md` | Competitive battlecard, negotiation playbook, close techniques |
+| `LESSONS.md` | Append-only lessons from failed verifications — read at every task start |
+| `phaseN_name.md` | Task files: chunk plan, Definition of Done, verification method + record, work log |
+| `phaseN_results.md` | Results files: the actual deliverables per task |
+| `phase0_intake.md` / `phase0_results.md` | Documents read, deal context, business model, pricing table |
+| `phase1_intelligence.md` / `phase1_results.md` | Client profile, competitors, exclusive advantage |
+| `phase2_strategy.md` / `phase2_results.md` | Influence principles, objection map |
+| `phase2.5_outreach.md` / `phase2.5_results.md` | Prospecting email + follow-up sequence (if applicable) |
+| `phase3_proposal.md` / `phase3_results.md` | Proposal draft, Word version history, delivery email |
+| `phase4_close.md` / `phase4_results.md` | Competitive battlecard, negotiation playbook, close techniques |
 | `DESIGN.md` | Provider visual system (if applicable) |

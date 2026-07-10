@@ -1,0 +1,40 @@
+{
+  "env": {
+    "CLAUDE_5H_TOKEN_LIMIT": "0",
+    "CLAUDE_5H_THRESHOLD": "90",
+    "CLAUDE_5H_AUTORESUME": "1"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-limit-guard.sh\" report"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-limit-guard.sh\" guard"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-limit-guard.sh\" schedule-resume"
+          }
+        ]
+      }
+    ]
+  }
+}
