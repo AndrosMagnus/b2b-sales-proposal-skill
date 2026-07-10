@@ -350,8 +350,9 @@ Append-only. One line per lesson. Read at every task start — it must stay shor
 
 The pause-at-90% / auto-resume-at-reset behavior is enforced by Claude Code hooks shipped in this repo:
 
-- `hooks/usage-limit-guard.sh` — estimates current 5-hour-block usage, blocks new tool calls at the threshold (allowing checkpoint writes), and schedules the automatic resume
-- `hooks/settings.json.example` — the hooks configuration to merge into `.claude/settings.json`
+- `hooks/statusline-usage-bridge.sh` — status-line script that saves the REAL rate-limit data Claude Code (≥ v2.1.80) passes to status lines, where the guard hooks can read it
+- `hooks/usage-limit-guard.sh` — blocks new tool calls at the threshold (allowing checkpoint writes), schedules the automatic resume at reset, and — via a `StopFailure` hook — schedules it even when the hard limit is hit mid-task
+- `hooks/settings.json.example` — the statusLine + hooks configuration to merge into settings
 
 Full setup, configuration, and honest caveats: see **`HOOKS.md`**.
 

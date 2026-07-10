@@ -1,8 +1,13 @@
 {
+  "//": "Merge the 'hooks' block into the PROJECT's .claude/settings.json. Put 'statusLine' in your USER-level ~/.claude/settings.json (rate limits are account-wide). CLAUDE_5H_TOKEN_LIMIT is only needed as a fallback on Claude Code < 2.1.80 — with the status-line bridge installed, real data is used and no calibration is required.",
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/hooks/statusline-usage-bridge.sh"
+  },
   "env": {
-    "CLAUDE_5H_TOKEN_LIMIT": "0",
     "CLAUDE_5H_THRESHOLD": "90",
-    "CLAUDE_5H_AUTORESUME": "1"
+    "CLAUDE_5H_AUTORESUME": "1",
+    "CLAUDE_5H_TOKEN_LIMIT": "0"
   },
   "hooks": {
     "SessionStart": [
@@ -32,6 +37,17 @@
           {
             "type": "command",
             "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-limit-guard.sh\" schedule-resume"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "rate_limit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/usage-limit-guard.sh\" resume-on-failure"
           }
         ]
       }

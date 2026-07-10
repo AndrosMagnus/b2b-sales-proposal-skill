@@ -1,40 +1,44 @@
 #!/usr/bin/env bash
-# usage-limit-guard.sh — Claude Code hook: pause near the 5-hour usage limit, auto-resume at reset.
+# usage-limit-guard.sh — Claude Code hooks: pause near the 5-hour usage limit, auto-resume at reset.
 #
 # Modes (first argument):
-#   report          SessionStart hook — injects current usage % into context so the agent can plan chunks
-#   guard           PreToolUse hook  — at >= threshold, denies new work tools (checkpoint writes stay allowed)
-#   schedule-resume Stop hook        — at >= threshold, schedules `claude --continue` for when the block resets
+#   report            SessionStart hook — injects current usage % into context so the agent plans chunks
+#   guard             PreToolUse hook   — at >= threshold, denies new work tools (checkpoint writes allowed)
+#   schedule-resume   Stop hook         — at >= threshold, schedules `claude --continue` for the reset
+#   resume-on-failure StopFailure hook (matcher: rate_limit) — the hard limit was hit mid-task:
+#                     schedules the auto-resume anyway, so nothing has to be re-run by hand
 #
-# Configuration (environment variables, e.g. in .claude/settings.json "env" or your shell profile):
-#   CLAUDE_5H_TOKEN_LIMIT   tokens per 5-hour block (REQUIRED — guard is a no-op when unset/0; see HOOKS.md
-#                           for how to calibrate this for your plan)
+# Usage data sources, in order of preference:
+#   1. REAL — ~/.claude/usage-guard/rate_limits.json, written by statusline-usage-bridge.sh.
+#      Claude Code >= v2.1.80 passes rate_limits (used_percentage, resets_at) to the status line,
+#      but NOT to hooks — the bridge closes that gap. No calibration needed.
+#   2. ESTIMATE — ccusage active block, else a sliding 5h window over local transcripts. Requires
+#      CLAUDE_5H_TOKEN_LIMIT to be calibrated (see HOOKS.md). Fallback for older Claude Code.
+#   With neither source, report/guard/schedule-resume are no-ops (fail open); resume-on-failure
+#   still works by polling `claude --continue` until the limit has reset.
+#
+# Configuration (environment variables):
 #   CLAUDE_5H_THRESHOLD     percentage at which to pause (default: 90)
-#   CLAUDE_5H_AUTORESUME    1 = schedule automatic resume at reset (default: 1; set 0 to resume manually)
-#
-# Anthropic does not expose 5-hour-limit usage to hooks, so this script ESTIMATES it:
-#   1st choice: ccusage (https://github.com/ryoppippi/ccusage) active-block token count, if available
-#   fallback:   sums token usage from local transcripts (~/.claude/projects/**/*.jsonl) over a sliding 5h window
-# Estimates are approximate — calibrate CLAUDE_5H_TOKEN_LIMIT as described in HOOKS.md. The script fails
-# open (exit 0, no blocking) on any measurement problem so it can never brick a session.
+#   CLAUDE_5H_AUTORESUME    1 = schedule automatic resume (default: 1; 0 = pause only)
+#   CLAUDE_5H_TOKEN_LIMIT   tokens per 5h block — only needed for the ESTIMATE fallback (default: 0)
 
 set -uo pipefail
 
 MODE="${1:-guard}"
-LIMIT="${CLAUDE_5H_TOKEN_LIMIT:-0}"
 THRESHOLD="${CLAUDE_5H_THRESHOLD:-90}"
 AUTORESUME="${CLAUDE_5H_AUTORESUME:-1}"
+LIMIT="${CLAUDE_5H_TOKEN_LIMIT:-0}"
 STATE_DIR="${HOME}/.claude/usage-guard"
-CACHE_TTL=60  # seconds between fresh measurements (PreToolUse fires often; keep it cheap)
+BRIDGE_TTL=1800  # accept bridge data up to 30 min old
+CACHE_TTL=60     # seconds between fresh estimate measurements
 
 INPUT="$(cat 2>/dev/null || true)"
-
-case "$LIMIT" in ''|*[!0-9]*) exit 0;; esac
-[ "$LIMIT" -gt 0 ] || exit 0
 command -v jq >/dev/null 2>&1 || exit 0
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
+case "$LIMIT" in ''|*[!0-9]*) LIMIT=0;; esac
 
 NOW=$(date -u +%s)
+PCT=0; BLOCK_END=0; USED=0; SOURCE=""
 
 # ISO-8601 UTC timestamp ("2026-07-10T07:00:00.000Z") -> epoch seconds. GNU date first, BSD fallback.
 to_epoch() {
@@ -42,7 +46,24 @@ to_epoch() {
   date -u -d "$ts" +%s 2>/dev/null || date -u -j -f "%Y-%m-%dT%H:%M:%S" "$ts" +%s 2>/dev/null
 }
 
-measure() {  # sets USED (tokens in current block) and BLOCK_END (epoch when the block resets)
+# Source 1: real rate-limit data saved by the status-line bridge
+read_bridge() {
+  local f="$STATE_DIR/rate_limits.json" wa reset
+  [ -f "$f" ] || return 1
+  wa=$(jq -r '.written_at // 0' "$f" 2>/dev/null)
+  case "$wa" in ''|*[!0-9]*) return 1;; esac
+  [ $((NOW - wa)) -le "$BRIDGE_TTL" ] || return 1
+  PCT=$(jq -r '.five_hour.used_percentage // empty | floor' "$f" 2>/dev/null)
+  case "$PCT" in ''|*[!0-9]*) PCT=0; return 1;; esac
+  reset=$(jq -r '.five_hour.resets_at // 0 | floor' "$f" 2>/dev/null)
+  case "$reset" in ''|*[!0-9]*) reset=0;; esac
+  BLOCK_END=$reset
+  SOURCE="real"
+  return 0
+}
+
+# Source 2: estimate — ccusage active block, else transcript sliding window
+measure_estimate() {
   USED=0; BLOCK_END=0
   local blocks_json end_ts
   if blocks_json=$(npx --yes ccusage@latest blocks --json --active 2>/dev/null) && [ -n "$blocks_json" ]; then
@@ -52,7 +73,6 @@ measure() {  # sets USED (tokens in current block) and BLOCK_END (epoch when the
   fi
   case "$USED" in ''|*[!0-9]*) USED=0;; esac
   if [ "$USED" -eq 0 ]; then
-    # Fallback: sliding 5-hour window over local transcripts (input + output + cache-creation tokens)
     local cutoff=$((NOW - 18000)) oldest=$NOW ts tok e
     while IFS=$'\t' read -r ts tok; do
       [ -n "$ts" ] || continue
@@ -72,55 +92,91 @@ measure() {  # sets USED (tokens in current block) and BLOCK_END (epoch when the
   [ "$BLOCK_END" -gt 0 ] || BLOCK_END=$((NOW + 18000))
 }
 
-# Cached measurement so PreToolUse stays fast between refreshes
-CACHE="$STATE_DIR/measure.cache"
-USED=0; BLOCK_END=0
-if [ -f "$CACHE" ]; then
-  read -r C_TS C_USED C_END < "$CACHE" 2>/dev/null || true
-  case "${C_TS:-x}${C_USED:-x}${C_END:-x}" in *[!0-9]*) C_TS=0;; esac
-  if [ "${C_TS:-0}" -gt 0 ] && [ $((NOW - C_TS)) -lt "$CACHE_TTL" ]; then
-    USED=$C_USED; BLOCK_END=$C_END
+read_estimate_cached() {
+  [ "$LIMIT" -gt 0 ] || return 1
+  local cache="$STATE_DIR/measure.cache" c_ts c_used c_end
+  if [ -f "$cache" ]; then
+    read -r c_ts c_used c_end < "$cache" 2>/dev/null || true
+    case "${c_ts:-x}" in *[!0-9]*|'') c_ts=0;; esac
+    case "${c_used:-x}" in *[!0-9]*|'') c_used=-1;; esac
+    case "${c_end:-x}" in *[!0-9]*|'') c_end=0;; esac
+    if [ "$c_ts" -gt 0 ] && [ $((NOW - c_ts)) -lt "$CACHE_TTL" ] && [ "$c_used" -ge 0 ]; then
+      USED=$c_used; BLOCK_END=$c_end
+      PCT=$((USED * 100 / LIMIT)); SOURCE="estimated"
+      return 0
+    fi
   fi
-fi
-if [ "$USED" -eq 0 ] && [ "$BLOCK_END" -eq 0 ]; then
-  measure
-  printf '%s %s %s\n' "$NOW" "$USED" "$BLOCK_END" > "$CACHE" 2>/dev/null || true
+  measure_estimate
+  printf '%s %s %s\n' "$NOW" "$USED" "$BLOCK_END" > "$cache" 2>/dev/null || true
+  PCT=$((USED * 100 / LIMIT)); SOURCE="estimated"
+  return 0
+}
+
+read_bridge || read_estimate_cached || true
+
+if [ "$BLOCK_END" -gt "$NOW" ]; then
+  RESET_HUMAN=$(date -u -d "@$BLOCK_END" '+%H:%M UTC' 2>/dev/null || date -u -r "$BLOCK_END" '+%H:%M UTC' 2>/dev/null || echo "the next 5-hour reset")
+else
+  RESET_HUMAN="the next 5-hour reset"
 fi
 
-PCT=$((USED * 100 / LIMIT))
-RESET_HUMAN=$(date -u -d "@$BLOCK_END" '+%H:%M UTC' 2>/dev/null || date -u -r "$BLOCK_END" '+%H:%M UTC' 2>/dev/null || echo "the next 5-hour reset")
+RESUME_PROMPT="The 5-hour usage limit has reset. Read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
+
+schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit has reset)
+  [ "$AUTORESUME" = "1" ] || return 0
+  local end="$1" lock="$STATE_DIR/resume.lock" pending cwd
+  if [ -f "$lock" ]; then
+    pending=$(cat "$lock" 2>/dev/null || echo 0)
+    case "$pending" in ''|*[!0-9]*) pending=0;; esac
+    [ "$pending" -gt "$NOW" ] && return 0   # a resume is already scheduled
+  fi
+  cwd=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+  [ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
+  if [ "$end" -gt "$NOW" ]; then
+    local delay=$((end - NOW + 120))   # +2 min safety margin past the reset
+    echo $((NOW + delay)) > "$lock" 2>/dev/null || return 0
+    nohup bash -c "sleep $delay; cd '$cwd' && claude --continue -p '$RESUME_PROMPT'; rm -f '$lock'" \
+      >> "$STATE_DIR/resume.log" 2>&1 &
+    echo "Usage-limit guard: auto-resume scheduled in ${delay}s (~${RESET_HUMAN}). Log: $STATE_DIR/resume.log" >&2
+  else
+    # Reset time unknown: retry every 15 min (max 6h) until a resume attempt gets through
+    echo $((NOW + 21600)) > "$lock" 2>/dev/null || return 0
+    nohup bash -c "cd '$cwd' || exit 1; for i in \$(seq 1 24); do sleep 900; if claude --continue -p '$RESUME_PROMPT'; then break; fi; done; rm -f '$lock'" \
+      >> "$STATE_DIR/resume.log" 2>&1 &
+    echo "Usage-limit guard: reset time unknown — auto-resume will retry every 15 min. Log: $STATE_DIR/resume.log" >&2
+  fi
+  disown 2>/dev/null || true
+}
 
 case "$MODE" in
   report)
+    [ -n "$SOURCE" ] || exit 0
     if [ "$PCT" -ge $((THRESHOLD - 20)) ]; then
-      echo "Usage-limit guard: ~${PCT}% of the 5-hour usage limit consumed (est. ${USED}/${LIMIT} tokens, block resets ~${RESET_HUMAN}). Per AGENTS.md, plan chunks so you can checkpoint before ${THRESHOLD}%."
+      echo "Usage-limit guard: ~${PCT}% of the 5-hour usage limit consumed (${SOURCE}; resets ~${RESET_HUMAN}). Per AGENTS.md, plan chunks so you can checkpoint before ${THRESHOLD}%."
     fi
     ;;
 
   guard)
+    [ -n "$SOURCE" ] || exit 0
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
     case "$TOOL" in
       Write|Edit|MultiEdit|NotebookEdit|TodoWrite|Read) exit 0 ;;  # keep checkpointing possible
     esac
-    jq -n --arg reason "Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}), then stop. Auto-resume is scheduled for ~${RESET_HUMAN}." \
+    jq -n --arg reason "Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}), then stop. Auto-resume is scheduled for ~${RESET_HUMAN}." \
       '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
     ;;
 
   schedule-resume)
+    [ -n "$SOURCE" ] || exit 0
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
-    [ "$AUTORESUME" = "1" ] || exit 0
-    CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
-    [ -n "$CWD" ] && [ -d "$CWD" ] || CWD="$PWD"
-    LOCK="$STATE_DIR/resume-${BLOCK_END}.lock"   # one resume per block, even across many Stop events
-    [ -e "$LOCK" ] && exit 0
-    : > "$LOCK" 2>/dev/null || exit 0
-    DELAY=$((BLOCK_END - NOW + 120))             # +2 min safety margin past the reset
-    [ "$DELAY" -lt 60 ] && DELAY=60
-    nohup bash -c "sleep $DELAY && cd '$CWD' && claude --continue -p 'The 5-hour usage limit has reset. Read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go.'" \
-      >> "$STATE_DIR/resume.log" 2>&1 &
-    disown 2>/dev/null || true
-    echo "Usage-limit guard: auto-resume scheduled in ${DELAY}s (~${RESET_HUMAN}). Log: $STATE_DIR/resume.log" >&2
+    schedule_resume "$BLOCK_END"
+    ;;
+
+  resume-on-failure)
+    # StopFailure(rate_limit): the hard wall was hit mid-task. Schedule the resume even with no
+    # usage source — poll mode handles an unknown reset time.
+    schedule_resume "$BLOCK_END"
     ;;
 esac
 

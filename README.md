@@ -137,9 +137,12 @@ Task files (`phaseN_name.md`) hold the process — chunk plan, Definition of Don
 
 ## 5-hour usage-limit guard (optional, Claude Code)
 
-`hooks/usage-limit-guard.sh` + `hooks/settings.json.example` implement the cockpit's Usage-Limit Rule: at ~90% of the 5-hour usage limit the agent checkpoints all state files and stops (finishing the current chunk only if it fits), and a background process automatically resumes the session with `claude --continue` when the limit resets.
+The `hooks/` scripts implement the cockpit's Usage-Limit Rule with **real usage data** (Claude Code ≥ v2.1.80 exposes `rate_limits` to status lines; a bridge script relays it to the hooks — no calibration needed):
 
-Setup, calibration, and caveats: **[HOOKS.md](HOOKS.md)**.
+- At ~90% of the 5-hour limit the agent checkpoints all state files and stops cleanly (finishing the current chunk only if it fits), and a background process automatically resumes the session with `claude --continue` the moment the limit resets
+- If the hard limit is ever hit mid-task anyway, a `StopFailure` hook schedules the same auto-resume — nothing has to be re-run manually
+
+Setup and caveats: **[HOOKS.md](HOOKS.md)**.
 
 ---
 
