@@ -10,8 +10,10 @@
 #   notify <msg>      internal — sends a user notification (also usable manually for testing)
 #
 # User notifications: whenever the guard pauses work or schedules/executes a resume, it tells you with
-# a simple message — desktop notification on macOS (osascript) or Linux (notify-send), and always a
-# line in ~/.claude/usage-guard/notifications.log:
+# a simple message in THREE places:
+#   1. the terminal — hook "systemMessage" rendered by the Claude Code UI
+#   2. the chat — the agent is required (deny reason + AGENTS.md rule) to post the pause/resume message
+#   3. desktop + log — osascript (macOS) / notify-send (Linux), always ~/.claude/usage-guard/notifications.log
 #   "Paused: 5-hour usage limit at ~92%. Work checkpointed. Auto-resume at 14:37 CET."
 #   "Usage limit reset — Claude resumed automatically."
 #
@@ -148,9 +150,11 @@ else
   RESET_HUMAN="when the limit resets (time unknown)"
 fi
 
-RESUME_PROMPT="The 5-hour usage limit has reset. Read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
+RESUME_PROMPT="The 5-hour usage limit has reset. Start your reply with one line confirming the automatic resume, e.g.: Resumed — 5-hour usage limit reset, continuing [task]. Then read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
 
-# Tell the user once per pause (guard, Stop, and StopFailure may all fire — the marker dedupes them)
+# Tell the user once per pause (guard, Stop, and StopFailure may all fire — the marker dedupes them).
+# Sets NOTIFIED=1 when this call was the one that notified.
+NOTIFIED=0
 maybe_notify_pause() {
   local msg="$1" marker="$STATE_DIR/pause-notified" prev=0 diff
   [ -f "$marker" ] && prev=$(cat "$marker" 2>/dev/null || echo 0)
@@ -158,9 +162,12 @@ maybe_notify_pause() {
   diff=$((BLOCK_END - prev)); [ "$diff" -lt 0 ] && diff=$((-diff))
   [ "$diff" -lt 600 ] && return 0   # already notified for this block
   echo "$BLOCK_END" > "$marker" 2>/dev/null || true
+  NOTIFIED=1
   notify "$msg"
 }
 
+# Sets SCHEDULED=1 when a resume was actually scheduled by this call (lockfile dedupes repeats)
+SCHEDULED=0
 schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit has reset)
   [ "$AUTORESUME" = "1" ] || return 0
   local end="$1" lock="$STATE_DIR/resume.lock" pending cwd
@@ -184,6 +191,7 @@ schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit
       >> "$STATE_DIR/resume.log" 2>&1 &
     echo "Usage-limit guard: reset time unknown — auto-resume will retry every 15 min. Log: $STATE_DIR/resume.log" >&2
   fi
+  SCHEDULED=1
   disown 2>/dev/null || true
 }
 
@@ -198,13 +206,22 @@ case "$MODE" in
   guard)
     [ -n "$SOURCE" ] || exit 0
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
-    maybe_notify_pause "Paused: 5-hour usage limit at ~${PCT}% (threshold ${THRESHOLD}%). Work is being checkpointed. Auto-resume at ${RESET_HUMAN}."
+    PAUSE_MSG="Paused: 5-hour usage limit at ~${PCT}% (threshold ${THRESHOLD}%). Work is being checkpointed. Auto-resume at ${RESET_HUMAN}."
+    maybe_notify_pause "$PAUSE_MSG"
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
     case "$TOOL" in
-      Write|Edit|MultiEdit|NotebookEdit|TodoWrite|Read) exit 0 ;;  # keep checkpointing possible
+      Write|Edit|MultiEdit|NotebookEdit|TodoWrite|Read)   # keep checkpointing possible
+        [ "$NOTIFIED" = "1" ] && jq -n --arg m "⏸ $PAUSE_MSG" '{systemMessage:$m}'
+        exit 0 ;;
     esac
-    jq -n --arg reason "Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}), then stop. Auto-resume is scheduled for ${RESET_HUMAN}." \
-      '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    REASON="Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}). Then end your reply with the pause message from the Usage-Limit Rule (stopping, why, and the resume time) and stop. Auto-resume is scheduled for ${RESET_HUMAN}."
+    if [ "$NOTIFIED" = "1" ]; then
+      jq -n --arg m "⏸ $PAUSE_MSG" --arg reason "$REASON" \
+        '{systemMessage:$m, hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    else
+      jq -n --arg reason "$REASON" \
+        '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
+    fi
     ;;
 
   schedule-resume)
@@ -212,6 +229,7 @@ case "$MODE" in
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
     maybe_notify_pause "Paused: 5-hour usage limit at ~${PCT}% (threshold ${THRESHOLD}%). Work is checkpointed. Auto-resume at ${RESET_HUMAN}."
     schedule_resume "$BLOCK_END"
+    [ "$SCHEDULED" = "1" ] && jq -n --arg m "⏸ Claude paused — 5-hour usage limit at ~${PCT}%. Auto-resume scheduled for ${RESET_HUMAN}." '{systemMessage:$m}'
     ;;
 
   resume-on-failure)
@@ -219,6 +237,7 @@ case "$MODE" in
     # with no usage source — poll mode handles an unknown reset time.
     maybe_notify_pause "Stopped: hit the 5-hour usage limit mid-task. Progress up to the last checkpoint is saved. Auto-resume at ${RESET_HUMAN}."
     schedule_resume "$BLOCK_END"
+    [ "$SCHEDULED" = "1" ] && jq -n --arg m "⏸ Claude stopped — hit the 5-hour usage limit mid-task. Progress up to the last checkpoint is saved. Auto-resume at ${RESET_HUMAN}." '{systemMessage:$m}'
     ;;
 esac
 

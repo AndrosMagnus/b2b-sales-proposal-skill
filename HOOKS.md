@@ -30,9 +30,16 @@ The result: normally the agent pauses *cleanly before the wall* — finishing th
 
 ---
 
-## You get told what happened
+## You get told what happened — in the terminal, the chat, and on the desktop
 
-Whenever the guard pauses or resumes, it sends you a simple message — a desktop notification on macOS (`osascript`) or Linux (`notify-send`), and always a line in `~/.claude/usage-guard/notifications.log`:
+Whenever the guard pauses or resumes, the same simple message reaches you through three channels:
+
+1. **Terminal** — the hooks emit a `systemMessage`, which the Claude Code UI renders directly in the session:
+   `⏸ Paused: 5-hour usage limit at ~93% (threshold 90%). Work is being checkpointed. Auto-resume at 16:36 CET.`
+2. **Chat** — the cockpit's Usage-Limit Rule requires the agent's last reply before stopping to end with
+   `⏸️ Stopping — 5-hour usage limit at ~93%. Everything is checkpointed in [files]. Auto-resume at 16:36.`
+   and the auto-resumed session to open with `▶️ Resumed — 5-hour usage limit reset. Continuing [task]…`
+3. **Desktop + log** — a notification via `osascript` (macOS) or `notify-send` (Linux), and always a line in `~/.claude/usage-guard/notifications.log`:
 
 ```
 Paused: 5-hour usage limit at ~93% (threshold 90%). Work is being checkpointed. Auto-resume at 16:36 CET.
@@ -40,7 +47,7 @@ Stopped: hit the 5-hour usage limit mid-task. Progress up to the last checkpoint
 Usage limit reset — Claude resumed automatically.
 ```
 
-One notification per pause (guard, Stop, and StopFailure events are deduplicated per block). Times are shown in your local timezone. On systems without a desktop notifier (e.g. WSL without `notify-send`), you still get the log file. Test it with:
+One message per pause per channel (guard, Stop, and StopFailure firings are deduplicated per rate-limit block; the Stop hook additionally confirms once when the resume is actually scheduled). Times are shown in your local timezone. On systems without a desktop notifier (e.g. WSL without `notify-send`), the terminal, chat, and log channels still work. Test the desktop/log channel with:
 
 ```bash
 bash .claude/hooks/usage-limit-guard.sh notify "test"

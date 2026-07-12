@@ -82,6 +82,10 @@ When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you ar
 - **Mid-task:** finish the current chunk only if it clearly fits; otherwise checkpoint immediately (same steps as the ~50% context checkpoint) and stop.
 - **Between tasks:** do NOT start the next task. Checkpoint and stop.
 - Set "Blocked by" in Current Status to: "5-hour usage limit — resumes automatically at [time]".
+- **Always tell the seller in chat.** Your final reply before stopping must end with:
+  "⏸️ Stopping — 5-hour usage limit at ~[X]%. Everything is checkpointed in [files]. Auto-resume at [time]."
+- **On automatic resume**, your first reply must start with:
+  "▶️ Resumed — 5-hour usage limit reset. Continuing [task] from [next action]."
 
 The Stop hook schedules an automatic resume when the limit resets (see HOOKS.md). Without hooks installed, resume manually after the reset: open the project and say "continue".
 
