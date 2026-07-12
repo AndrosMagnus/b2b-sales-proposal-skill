@@ -20,7 +20,7 @@ Run these checks in order before starting Phase 0:
 1. **Seller profile** → load if exists, run setup wizard if missing
 2. **Dependencies** → verify required skills are installed; install or guide if any are missing
 3. **Project CLAUDE.md** → create or update cockpit structure if missing
-4. **Usage-limit hook (Claude Code only, optional)** → if `.claude/hooks/usage-limit-guard.sh` is not present, mention once: "Optional: this workflow ships a 5-hour usage-limit guard that pauses at ~90% and auto-resumes at reset — see HOOKS.md in the skill repo to install it." Do not block on it.
+4. **Usage-limit automation (Claude Code only, optional)** → if running in Claude Code and `~/.claude/hooks/usage-limit-guard.sh` is not present, offer once: "Optional: this workflow ships automation that pauses at ~90% of the 5-hour usage limit, notifies you, and auto-resumes at reset. Install it now? (yes/skip)" If yes, run `bash <skill folder>/adapters/claude-code/install.sh` (the installer is included in the installed skill folder; it backs up settings and is safe to re-run). In other agents, skip silently — the Usage-Limit Rule in AGENTS.md covers them behaviorally. Do not block on this step.
 5. Begin Phase 0
 
 ---
@@ -204,9 +204,9 @@ Every task is verified for QUALITY, not just completion.
 
 ---
 
-## Usage-Limit Rule (5-hour limit)
+## Usage-Limit Rule
 
-When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you are otherwise told the limit is near):
+When you learn that ≥ ~90% of the usage limit is consumed — from the automation adapter's warning (Claude Code), your agent's own limit indicator, or the seller telling you:
 - **Mid-task:** finish the current chunk only if it clearly fits; otherwise checkpoint immediately (same steps as the ~50% context checkpoint) and stop.
 - **Between tasks:** do NOT start the next task. Checkpoint and stop.
 - Set "Blocked by" in Current Status to: "5-hour usage limit — resumes automatically at [time]".
@@ -215,7 +215,7 @@ When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you ar
 - **On automatic resume**, your first reply must start with:
   "▶️ Resumed — 5-hour usage limit reset. Continuing [task] from [next action]."
 
-The Stop hook schedules an automatic resume when the limit resets (see HOOKS.md). Without hooks installed, resume manually after the reset: open the project and say "continue".
+If the agent's automation adapter is installed (Claude Code: `adapters/claude-code/` in the skill repo), detection, notifications, and the resume are automatic. In any other agent — or without the adapter — follow this rule manually and resume after the reset by opening the project and saying "continue".
 
 ---
 
@@ -624,7 +624,7 @@ FAIL → record the lesson in LESSONS.md and redo per the Verification Protocol.
 - End each phase → save phaseN_name.md + phaseN_results.md → update PLAN → update AGENTS.md → then continue. Never skip the save.
 - On resuming after starting a new session: read `AGENTS.md`, the status header of `PLAN_[client].md`, then ONLY the active task file. Do not auto-load all files.
 - If context from a prior phase is needed, load it on demand — not preemptively.
-- **5-hour usage limit:** at ~90% (hook warning or otherwise), don't start new tasks; finish the current chunk only if it clearly fits, checkpoint, set "Blocked by" in AGENTS.md, and stop. Auto-resume is handled by the Stop hook (HOOKS.md) or manually after reset.
+- **Usage limit:** at ~90% (adapter warning, agent indicator, or seller notice), don't start new tasks; finish the current chunk only if it clearly fits, checkpoint, set "Blocked by" in AGENTS.md, announce the pause in chat, and stop. Auto-resume is handled by the Claude Code adapter (adapters/claude-code/) where installed; elsewhere resume manually after reset.
 - Pricing in the commercial document: always closed packages. Never per-unit, per-hectare, per-user, or similar formulas.
 - Document language and tone: use [output_language from seller profile].
 - Apply [standing_rules from seller profile] to all output documents.

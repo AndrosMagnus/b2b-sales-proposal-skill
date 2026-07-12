@@ -27,11 +27,21 @@ Each phase saves its output to a dedicated file. State is fully preserved across
 - **Context budgeting** — every task is chunked to fit ~50% of a context window, with a checkpoint at every chunk boundary
 - **Task + results files** — each phase gets a task file (chunk plan, Definition of Done, verification method, work log) and a separate results file with the clean deliverables
 - **Verification loop** — every task defines how its output will be tested *before* work starts, runs the test after, and on failure retries with lessons recorded in `LESSONS.md`
-- **5-hour usage-limit guard** — optional Claude Code hooks that pause work at ~90% of the limit and auto-resume when it resets (see [HOOKS.md](HOOKS.md))
+- **Usage-limit automation** — pauses work at ~90% of the usage limit, tells you why and when it restarts, and auto-resumes at reset. Automated in Claude Code via the [`adapters/claude-code/`](adapters/claude-code/HOOKS.md) adapter; behavioral rule in every other agent
+
+The core workflow is **agent-generic**: everything lives in `AGENTS.md` + plain markdown files that Codex, Cursor, Copilot, Windsurf, Aider, and 30+ other agents read natively. Agent-specific automation ships as optional adapters in `adapters/` (currently: Claude Code).
 
 ---
 
 ## Install
+
+**One-paste (recommended)** — installs the skill for every agent detected on your machine, and adds the Claude Code automation adapter automatically if Claude Code is present:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/AndrosMagnus/b2b-sales-proposal-skill/main/install.sh)"
+```
+
+**Skill only** (any agent; the skill offers the Claude Code adapter later on activation):
 
 ```bash
 npx skills add https://github.com/AndrosMagnus/b2b-sales-proposal-skill --skill b2b-sales-proposal
@@ -135,14 +145,17 @@ Task files (`phaseN_name.md`) hold the process — chunk plan, Definition of Don
 
 ---
 
-## 5-hour usage-limit guard (optional, Claude Code)
+## Usage-limit automation (adapters)
 
-The `hooks/` scripts implement the cockpit's Usage-Limit Rule with **real usage data** (Claude Code ≥ v2.1.80 exposes `rate_limits` to status lines; a bridge script relays it to the hooks — no calibration needed):
+The cockpit's Usage-Limit Rule is generic: at ~90% of the usage limit, checkpoint everything, announce the pause in chat, stop, and resume after reset. How much of that is *automated* depends on the agent:
 
-- At ~90% of the 5-hour limit the agent checkpoints all state files and stops cleanly (finishing the current chunk only if it fits), and a background process automatically resumes the session with `claude --continue` the moment the limit resets
+**Claude Code — fully automated** via [`adapters/claude-code/`](adapters/claude-code/HOOKS.md), installed automatically by `install.sh` (or offered by the skill on activation). Uses **real usage data** (Claude Code ≥ v2.1.80 exposes `rate_limits` to status lines; a bridge script relays it to the hooks — no calibration needed):
+
+- At ~90% the agent checkpoints all state files and stops cleanly (finishing the current chunk only if it fits); a background process resumes the session with `claude --continue` the moment the limit resets
 - If the hard limit is ever hit mid-task anyway, a `StopFailure` hook schedules the same auto-resume — nothing has to be re-run manually
+- You're told what happened and when it restarts — in the terminal, the chat, a desktop notification, and `~/.claude/usage-guard/notifications.log`
 
-Setup and caveats: **[HOOKS.md](HOOKS.md)**.
+**Codex, Cursor, and other agents — behavioral**: they read the same rule in `AGENTS.md` and follow it (checkpoint + stop + announce), but they expose no hook system for automatic pause detection or resume — you say "continue" after the reset. Additional adapters can be added under `adapters/` as agents grow the needed surfaces.
 
 ---
 

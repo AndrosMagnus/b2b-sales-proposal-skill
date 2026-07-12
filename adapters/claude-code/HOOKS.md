@@ -1,8 +1,8 @@
-# HOOKS.md — 5-hour usage-limit guard
+# HOOKS.md — Claude Code adapter: usage-limit automation
 
 Claude Code hooks that enforce the cockpit's **Usage-Limit Rule**: at ~90% of the 5-hour usage limit the agent stops starting new work, checkpoints everything (task file, PLAN, `AGENTS.md` Current Status), and an automatic resume fires the moment the limit resets. If the hard limit is ever hit mid-task anyway, a safety-net hook schedules the resume too — you never have to re-run anything manually.
 
-**Claude Code only.** Other agents (Codex, Cursor, …) don't run these hooks — for them the Usage-Limit Rule in `AGENTS.md` is a behavioral instruction, and resume is manual.
+**This is the Claude Code adapter** (`adapters/claude-code/`). The skill's core workflow — chunking, PLAN, task files, verification, lessons learned — is generic and runs in any AGENTS.md-reading agent (Codex, Cursor, Copilot, Windsurf, Aider, …). Those agents follow the Usage-Limit Rule as a behavioral instruction and resume manually; they don't expose a hook system that could automate it. This adapter adds the automation for Claude Code.
 
 ---
 
@@ -11,7 +11,7 @@ Claude Code hooks that enforce the cockpit's **Usage-Limit Rule**: at ~90% of th
 Claude Code **v2.1.80+** passes real rate-limit data (`rate_limits.five_hour.used_percentage`, `resets_at`) to **status line** scripts — but not to hooks. So this setup uses the status line as a bridge:
 
 1. **`statusline-usage-bridge.sh`** (status line, user-level) — saves the real numbers to `~/.claude/usage-guard/rate_limits.json` on every status-line refresh, and prints a normal status line (model · dir · 5h % · weekly %). If you already have a custom status line, copy just the "bridge" block into your own script.
-2. **`usage-limit-guard.sh`** (hooks, per project) — reads that file for the real percentage and reset time. **No calibration needed.**
+2. **`usage-limit-guard.sh`** (hooks) — reads that file for the real percentage and reset time. **No calibration needed.**
 
 On older Claude Code versions (or if the bridge isn't installed), the guard falls back to an **estimate** (ccusage active block, else a sliding 5-hour window over local transcripts) — that path requires calibrating `CLAUDE_5H_TOKEN_LIMIT` (see below). With neither source available, the guard fails open (never blocks your session).
 
@@ -50,40 +50,30 @@ Usage limit reset — Claude resumed automatically.
 One message per pause per channel (guard, Stop, and StopFailure firings are deduplicated per rate-limit block; the Stop hook additionally confirms once when the resume is actually scheduled). Times are shown in your local timezone. On systems without a desktop notifier (e.g. WSL without `notify-send`), the terminal, chat, and log channels still work. Test the desktop/log channel with:
 
 ```bash
-bash .claude/hooks/usage-limit-guard.sh notify "test"
+bash ~/.claude/hooks/usage-limit-guard.sh notify "test"
 ```
 
 ---
 
 ## Install
 
-**1. Status-line bridge (user-level — rate limits are account-wide):**
+**Automatic (recommended)** — the repo's one-paste installer detects Claude Code and runs this adapter's installer for you:
 
 ```bash
-mkdir -p ~/.claude/hooks
-cp hooks/statusline-usage-bridge.sh ~/.claude/hooks/
-chmod +x ~/.claude/hooks/statusline-usage-bridge.sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/AndrosMagnus/b2b-sales-proposal-skill/main/install.sh)"
 ```
 
-Add to `~/.claude/settings.json`:
-
-```json
-"statusLine": { "type": "command", "command": "bash ~/.claude/hooks/statusline-usage-bridge.sh" }
-```
-
-Already have a status line you like? Keep it — just add the bridge block (the ~8 lines under `--- bridge ---` in the script) to the top of your own script.
-
-**2. Guard hooks (per deal project):**
+Or run just the adapter installer:
 
 ```bash
-mkdir -p .claude/hooks
-cp hooks/usage-limit-guard.sh .claude/hooks/
-chmod +x .claude/hooks/usage-limit-guard.sh
+bash adapters/claude-code/install.sh
 ```
 
-Merge the `hooks` and `env` blocks of `hooks/settings.json.example` into the project's `.claude/settings.json` (create it if missing; if you already have hooks, merge the arrays — don't overwrite).
+It copies both scripts to `~/.claude/hooks/` and merges the hooks, status line, and env defaults into `~/.claude/settings.json` — with a timestamped backup, never overwriting an existing custom statusLine, and never duplicating entries (safe to re-run). The skill also offers this installer once on activation if it detects the adapter is missing. User-level install is the default because rate limits are account-wide.
 
-**3. Requirements:** `bash`, `jq`. That's it on Claude Code ≥ 2.1.80. On older versions also calibrate the fallback (below); Node/npx recommended there so the script can use [`ccusage`](https://github.com/ryoppippi/ccusage).
+**Manual** — copy `usage-limit-guard.sh` and `statusline-usage-bridge.sh` to `~/.claude/hooks/`, `chmod +x` them, and merge `settings.json.example` into `~/.claude/settings.json`. Already have a status line you like? Keep it — just add the bridge block (the ~8 lines under `--- bridge ---` in the script) to the top of your own script. To scope the guard to one project instead, put the `hooks` block in that project's `.claude/settings.json` with adjusted paths.
+
+**Requirements:** `bash`, `jq`. That's it on Claude Code ≥ 2.1.80. On older versions also calibrate the fallback (below); Node/npx recommended there so the script can use [`ccusage`](https://github.com/ryoppippi/ccusage).
 
 ---
 

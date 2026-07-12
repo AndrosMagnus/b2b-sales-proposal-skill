@@ -10,7 +10,7 @@ The skill creates these files for you when you run `/b2b-sales-proposal`. Use th
 - **Results files** — deliverables live in separate `phaseN_results.md` files, never auto-loaded
 - **Verification loop** — every task defines how it will be tested BEFORE work starts, runs the test after, and retries with lessons learned on failure
 - **`LESSONS.md`** — append-only lessons from failed verifications, read at every task start
-- **5-hour usage-limit hook** — pauses work at ~90% of the limit and auto-resumes when it resets (see `HOOKS.md`)
+- **Usage-limit automation** — pauses work at ~90% of the limit, notifies you, and auto-resumes when it resets. Automated in Claude Code via `adapters/claude-code/`; behavioral rule in all other agents
 
 Replace everything in [ ] with actual values.
 
@@ -76,9 +76,9 @@ Every task is verified for QUALITY, not just completion.
 
 ---
 
-## Usage-Limit Rule (5-hour limit)
+## Usage-Limit Rule
 
-When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you are otherwise told the limit is near):
+When you learn that ≥ ~90% of the usage limit is consumed — from the automation adapter's warning (Claude Code), your agent's own limit indicator, or the seller telling you:
 - **Mid-task:** finish the current chunk only if it clearly fits; otherwise checkpoint immediately (same steps as the ~50% context checkpoint) and stop.
 - **Between tasks:** do NOT start the next task. Checkpoint and stop.
 - Set "Blocked by" in Current Status to: "5-hour usage limit — resumes automatically at [time]".
@@ -87,7 +87,7 @@ When the usage-limit guard reports ≥ ~90% of the 5-hour usage limit (or you ar
 - **On automatic resume**, your first reply must start with:
   "▶️ Resumed — 5-hour usage limit reset. Continuing [task] from [next action]."
 
-The Stop hook schedules an automatic resume when the limit resets (see HOOKS.md). Without hooks installed, resume manually after the reset: open the project and say "continue".
+If the agent's automation adapter is installed (Claude Code: `adapters/claude-code/` in the skill repo), detection, notifications, and the resume are automatic. In any other agent — or without the adapter — follow this rule manually and resume after the reset by opening the project and saying "continue".
 
 ---
 
@@ -350,15 +350,16 @@ Append-only. One line per lesson. Read at every task start — it must stay shor
 
 ---
 
-## Usage-limit hook (5-hour limit)
+## Usage-limit automation (adapters)
 
-The pause-at-90% / auto-resume-at-reset behavior is enforced by Claude Code hooks shipped in this repo:
+The workflow's core (everything above) is generic — it runs in any AGENTS.md-reading agent. The pause-at-90% / auto-resume-at-reset *automation* is per-agent; the Claude Code adapter ships in `adapters/claude-code/`:
 
-- `hooks/statusline-usage-bridge.sh` — status-line script that saves the REAL rate-limit data Claude Code (≥ v2.1.80) passes to status lines, where the guard hooks can read it
-- `hooks/usage-limit-guard.sh` — blocks new tool calls at the threshold (allowing checkpoint writes), schedules the automatic resume at reset, and — via a `StopFailure` hook — schedules it even when the hard limit is hit mid-task
-- `hooks/settings.json.example` — the statusLine + hooks configuration to merge into settings
+- `install.sh` — one-command installer (also run automatically by the repo's root `install.sh` and offered by the skill on activation)
+- `statusline-usage-bridge.sh` — status-line script that saves the REAL rate-limit data Claude Code (≥ v2.1.80) passes to status lines, where the guard hooks can read it
+- `usage-limit-guard.sh` — blocks new tool calls at the threshold (allowing checkpoint writes), notifies you in the terminal/chat/desktop, schedules the automatic resume at reset, and — via a `StopFailure` hook — schedules it even when the hard limit is hit mid-task
+- `settings.json.example` + `HOOKS.md` — reference configuration, full setup, and honest caveats
 
-Full setup, configuration, and honest caveats: see **`HOOKS.md`**.
+Agents without an adapter (Codex, Cursor, …) follow the Usage-Limit Rule behaviorally and resume manually.
 
 ---
 
