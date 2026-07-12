@@ -7,6 +7,13 @@
 #   schedule-resume   Stop hook         — at >= threshold, schedules `claude --continue` for the reset
 #   resume-on-failure StopFailure hook (matcher: rate_limit) — the hard limit was hit mid-task:
 #                     schedules the auto-resume anyway, so nothing has to be re-run by hand
+#   notify <msg>      internal — sends a user notification (also usable manually for testing)
+#
+# User notifications: whenever the guard pauses work or schedules/executes a resume, it tells you with
+# a simple message — desktop notification on macOS (osascript) or Linux (notify-send), and always a
+# line in ~/.claude/usage-guard/notifications.log:
+#   "Paused: 5-hour usage limit at ~92%. Work checkpointed. Auto-resume at 14:37 CET."
+#   "Usage limit reset — Claude resumed automatically."
 #
 # Usage data sources, in order of preference:
 #   1. REAL — ~/.claude/usage-guard/rate_limits.json, written by statusline-usage-bridge.sh.
@@ -32,10 +39,31 @@ STATE_DIR="${HOME}/.claude/usage-guard"
 BRIDGE_TTL=1800  # accept bridge data up to 30 min old
 CACHE_TTL=60     # seconds between fresh estimate measurements
 
-INPUT="$(cat 2>/dev/null || true)"
-command -v jq >/dev/null 2>&1 || exit 0
+SELF="${BASH_SOURCE[0]}"
+case "$SELF" in /*) ;; *) SELF="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd)/$(basename "$SELF")";; esac
+
 mkdir -p "$STATE_DIR" 2>/dev/null || exit 0
 case "$LIMIT" in ''|*[!0-9]*) LIMIT=0;; esac
+
+# --- user notification: desktop popup when possible, always logged ---
+notify() {
+  local msg="$1" title="Claude Code — 5h usage limit"
+  if command -v osascript >/dev/null 2>&1; then
+    osascript -e "display notification \"$msg\" with title \"$title\"" >/dev/null 2>&1
+  elif command -v notify-send >/dev/null 2>&1; then
+    notify-send "$title" "$msg" >/dev/null 2>&1
+  fi
+  printf '%s  %s\n' "$(date '+%F %H:%M:%S')" "$msg" >> "$STATE_DIR/notifications.log" 2>/dev/null || true
+}
+
+if [ "$MODE" = "notify" ]; then
+  shift || true
+  notify "${*:-Claude Code usage-limit guard test notification.}"
+  exit 0
+fi
+
+INPUT="$(cat 2>/dev/null || true)"
+command -v jq >/dev/null 2>&1 || exit 0
 
 NOW=$(date -u +%s)
 PCT=0; BLOCK_END=0; USED=0; SOURCE=""
@@ -115,12 +143,23 @@ read_estimate_cached() {
 read_bridge || read_estimate_cached || true
 
 if [ "$BLOCK_END" -gt "$NOW" ]; then
-  RESET_HUMAN=$(date -u -d "@$BLOCK_END" '+%H:%M UTC' 2>/dev/null || date -u -r "$BLOCK_END" '+%H:%M UTC' 2>/dev/null || echo "the next 5-hour reset")
+  RESET_HUMAN=$(date -d "@$BLOCK_END" '+%H:%M %Z' 2>/dev/null || date -r "$BLOCK_END" '+%H:%M %Z' 2>/dev/null || echo "the next reset")
 else
-  RESET_HUMAN="the next 5-hour reset"
+  RESET_HUMAN="when the limit resets (time unknown)"
 fi
 
 RESUME_PROMPT="The 5-hour usage limit has reset. Read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
+
+# Tell the user once per pause (guard, Stop, and StopFailure may all fire — the marker dedupes them)
+maybe_notify_pause() {
+  local msg="$1" marker="$STATE_DIR/pause-notified" prev=0 diff
+  [ -f "$marker" ] && prev=$(cat "$marker" 2>/dev/null || echo 0)
+  case "$prev" in ''|*[!0-9]*) prev=0;; esac
+  diff=$((BLOCK_END - prev)); [ "$diff" -lt 0 ] && diff=$((-diff))
+  [ "$diff" -lt 600 ] && return 0   # already notified for this block
+  echo "$BLOCK_END" > "$marker" 2>/dev/null || true
+  notify "$msg"
+}
 
 schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit has reset)
   [ "$AUTORESUME" = "1" ] || return 0
@@ -135,13 +174,13 @@ schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit
   if [ "$end" -gt "$NOW" ]; then
     local delay=$((end - NOW + 120))   # +2 min safety margin past the reset
     echo $((NOW + delay)) > "$lock" 2>/dev/null || return 0
-    nohup bash -c "sleep $delay; cd '$cwd' && claude --continue -p '$RESUME_PROMPT'; rm -f '$lock'" \
+    nohup bash -c "sleep $delay; bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; cd '$cwd' && claude --continue -p '$RESUME_PROMPT'; rm -f '$lock'" \
       >> "$STATE_DIR/resume.log" 2>&1 &
     echo "Usage-limit guard: auto-resume scheduled in ${delay}s (~${RESET_HUMAN}). Log: $STATE_DIR/resume.log" >&2
   else
     # Reset time unknown: retry every 15 min (max 6h) until a resume attempt gets through
     echo $((NOW + 21600)) > "$lock" 2>/dev/null || return 0
-    nohup bash -c "cd '$cwd' || exit 1; for i in \$(seq 1 24); do sleep 900; if claude --continue -p '$RESUME_PROMPT'; then break; fi; done; rm -f '$lock'" \
+    nohup bash -c "cd '$cwd' || exit 1; for i in \$(seq 1 24); do sleep 900; if claude --continue -p '$RESUME_PROMPT'; then bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; break; fi; done; rm -f '$lock'" \
       >> "$STATE_DIR/resume.log" 2>&1 &
     echo "Usage-limit guard: reset time unknown — auto-resume will retry every 15 min. Log: $STATE_DIR/resume.log" >&2
   fi
@@ -159,23 +198,26 @@ case "$MODE" in
   guard)
     [ -n "$SOURCE" ] || exit 0
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
+    maybe_notify_pause "Paused: 5-hour usage limit at ~${PCT}% (threshold ${THRESHOLD}%). Work is being checkpointed. Auto-resume at ${RESET_HUMAN}."
     TOOL=$(printf '%s' "$INPUT" | jq -r '.tool_name // empty' 2>/dev/null)
     case "$TOOL" in
       Write|Edit|MultiEdit|NotebookEdit|TodoWrite|Read) exit 0 ;;  # keep checkpointing possible
     esac
-    jq -n --arg reason "Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}), then stop. Auto-resume is scheduled for ~${RESET_HUMAN}." \
+    jq -n --arg reason "Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}), then stop. Auto-resume is scheduled for ${RESET_HUMAN}." \
       '{hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
     ;;
 
   schedule-resume)
     [ -n "$SOURCE" ] || exit 0
     [ "$PCT" -ge "$THRESHOLD" ] || exit 0
+    maybe_notify_pause "Paused: 5-hour usage limit at ~${PCT}% (threshold ${THRESHOLD}%). Work is checkpointed. Auto-resume at ${RESET_HUMAN}."
     schedule_resume "$BLOCK_END"
     ;;
 
   resume-on-failure)
-    # StopFailure(rate_limit): the hard wall was hit mid-task. Schedule the resume even with no
-    # usage source — poll mode handles an unknown reset time.
+    # StopFailure(rate_limit): the hard wall was hit mid-task. Notify + schedule the resume even
+    # with no usage source — poll mode handles an unknown reset time.
+    maybe_notify_pause "Stopped: hit the 5-hour usage limit mid-task. Progress up to the last checkpoint is saved. Auto-resume at ${RESET_HUMAN}."
     schedule_resume "$BLOCK_END"
     ;;
 esac

@@ -30,6 +30,24 @@ The result: normally the agent pauses *cleanly before the wall* — finishing th
 
 ---
 
+## You get told what happened
+
+Whenever the guard pauses or resumes, it sends you a simple message — a desktop notification on macOS (`osascript`) or Linux (`notify-send`), and always a line in `~/.claude/usage-guard/notifications.log`:
+
+```
+Paused: 5-hour usage limit at ~93% (threshold 90%). Work is being checkpointed. Auto-resume at 16:36 CET.
+Stopped: hit the 5-hour usage limit mid-task. Progress up to the last checkpoint is saved. Auto-resume at 18:06 CET.
+Usage limit reset — Claude resumed automatically.
+```
+
+One notification per pause (guard, Stop, and StopFailure events are deduplicated per block). Times are shown in your local timezone. On systems without a desktop notifier (e.g. WSL without `notify-send`), you still get the log file. Test it with:
+
+```bash
+bash .claude/hooks/usage-limit-guard.sh notify "test"
+```
+
+---
+
 ## Install
 
 **1. Status-line bridge (user-level — rate limits are account-wide):**
