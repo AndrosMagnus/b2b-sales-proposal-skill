@@ -9,10 +9,15 @@
 #                     schedules the auto-resume anyway, so nothing has to be re-run by hand
 #   notify <msg>      internal — sends a user notification (also usable manually for testing)
 #
+# Project-agnostic: works standalone in ANY project (this repo's skill is not required). If the
+# current project has an AGENTS.md (e.g. the b2b-sales-proposal cockpit), checkpoint/resume messages
+# reference it automatically; otherwise they use generic "save your work" wording. Override either
+# with CLAUDE_5H_CHECKPOINT_HINT / CLAUDE_5H_RESUME_HINT (see Configuration below).
+#
 # User notifications: whenever the guard pauses work or schedules/executes a resume, it tells you with
 # a simple message in THREE places:
 #   1. the terminal — hook "systemMessage" rendered by the Claude Code UI
-#   2. the chat — the agent is required (deny reason + AGENTS.md rule) to post the pause/resume message
+#   2. the chat — the agent is required (deny reason) to post the pause/resume message
 #   3. desktop + log — osascript (macOS) / notify-send (Linux), always ~/.claude/usage-guard/notifications.log
 #   "Paused: 5-hour usage limit at ~92%. Work checkpointed. Auto-resume at 14:37 CET."
 #   "Usage limit reset — Claude resumed automatically."
@@ -27,9 +32,14 @@
 #   still works by polling `claude --continue` until the limit has reset.
 #
 # Configuration (environment variables):
-#   CLAUDE_5H_THRESHOLD     percentage at which to pause (default: 90)
-#   CLAUDE_5H_AUTORESUME    1 = schedule automatic resume (default: 1; 0 = pause only)
-#   CLAUDE_5H_TOKEN_LIMIT   tokens per 5h block — only needed for the ESTIMATE fallback (default: 0)
+#   CLAUDE_5H_THRESHOLD        percentage at which to pause (default: 90)
+#   CLAUDE_5H_AUTORESUME       1 = schedule automatic resume (default: 1; 0 = pause only)
+#   CLAUDE_5H_TOKEN_LIMIT      tokens per 5h block — only needed for the ESTIMATE fallback (default: 0)
+#   CLAUDE_5H_CHECKPOINT_HINT  override the "how to save state" instruction the agent is told to
+#                              follow before stopping (default: auto — AGENTS.md-aware if present,
+#                              else generic "commit / save your work")
+#   CLAUDE_5H_RESUME_HINT      override the "how to pick back up" instruction given on auto-resume
+#                              (default: auto, same logic)
 
 set -uo pipefail
 
@@ -150,7 +160,29 @@ else
   RESET_HUMAN="when the limit resets (time unknown)"
 fi
 
-RESUME_PROMPT="The 5-hour usage limit has reset. Start your reply with one line confirming the automatic resume, e.g.: Resumed — 5-hour usage limit reset, continuing [task]. Then read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
+# Project-aware defaults: reference AGENTS.md's Session Protocol when the project has one (e.g. the
+# b2b-sales-proposal cockpit), otherwise fall back to generic save-your-work instructions. Either can
+# be overridden wholesale via CLAUDE_5H_CHECKPOINT_HINT / CLAUDE_5H_RESUME_HINT for any other convention.
+CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+[ -n "$CWD" ] && [ -d "$CWD" ] || CWD="$PWD"
+
+if [ -n "${CLAUDE_5H_CHECKPOINT_HINT:-}" ]; then
+  CHECKPOINT_HINT="$CLAUDE_5H_CHECKPOINT_HINT"
+elif [ -f "$CWD/AGENTS.md" ]; then
+  CHECKPOINT_HINT="This project uses an AGENTS.md cockpit — follow its Session Protocol: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN})."
+else
+  CHECKPOINT_HINT="Checkpoint your work now: save any files in progress, commit if that's useful here, and note what's left so you (or the auto-resumed session) can pick up cleanly."
+fi
+
+if [ -n "${CLAUDE_5H_RESUME_HINT:-}" ]; then
+  RESUME_HINT="$CLAUDE_5H_RESUME_HINT"
+elif [ -f "$CWD/AGENTS.md" ]; then
+  RESUME_HINT="Read AGENTS.md, follow the Session Protocol, and continue from Current Status / Next action. Clear the Blocked by field and checkpoint files as you go."
+else
+  RESUME_HINT="Check recent file changes, commits, or notes to see where things were left, then continue."
+fi
+
+RESUME_PROMPT="The 5-hour usage limit has reset. Start your reply with one line confirming the automatic resume, e.g.: Resumed — 5-hour usage limit reset, continuing [task]. Then ${RESUME_HINT}"
 
 # Tell the user once per pause (guard, Stop, and StopFailure may all fire — the marker dedupes them).
 # Sets NOTIFIED=1 when this call was the one that notified.
@@ -170,24 +202,22 @@ maybe_notify_pause() {
 SCHEDULED=0
 schedule_resume() {  # $1 = block-end epoch (0 = unknown -> poll until the limit has reset)
   [ "$AUTORESUME" = "1" ] || return 0
-  local end="$1" lock="$STATE_DIR/resume.lock" pending cwd
+  local end="$1" lock="$STATE_DIR/resume.lock" pending
   if [ -f "$lock" ]; then
     pending=$(cat "$lock" 2>/dev/null || echo 0)
     case "$pending" in ''|*[!0-9]*) pending=0;; esac
     [ "$pending" -gt "$NOW" ] && return 0   # a resume is already scheduled
   fi
-  cwd=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
-  [ -n "$cwd" ] && [ -d "$cwd" ] || cwd="$PWD"
   if [ "$end" -gt "$NOW" ]; then
     local delay=$((end - NOW + 120))   # +2 min safety margin past the reset
     echo $((NOW + delay)) > "$lock" 2>/dev/null || return 0
-    nohup bash -c "sleep $delay; bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; cd '$cwd' && claude --continue -p '$RESUME_PROMPT'; rm -f '$lock'" \
+    nohup bash -c "sleep $delay; bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; cd '$CWD' && claude --continue -p '$RESUME_PROMPT'; rm -f '$lock'" \
       >> "$STATE_DIR/resume.log" 2>&1 &
     echo "Usage-limit guard: auto-resume scheduled in ${delay}s (~${RESET_HUMAN}). Log: $STATE_DIR/resume.log" >&2
   else
     # Reset time unknown: retry every 15 min (max 6h) until a resume attempt gets through
     echo $((NOW + 21600)) > "$lock" 2>/dev/null || return 0
-    nohup bash -c "cd '$cwd' || exit 1; for i in \$(seq 1 24); do sleep 900; if claude --continue -p '$RESUME_PROMPT'; then bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; break; fi; done; rm -f '$lock'" \
+    nohup bash -c "cd '$CWD' || exit 1; for i in \$(seq 1 24); do sleep 900; if claude --continue -p '$RESUME_PROMPT'; then bash '$SELF' notify 'Usage limit reset — Claude resumed automatically.' </dev/null; break; fi; done; rm -f '$lock'" \
       >> "$STATE_DIR/resume.log" 2>&1 &
     echo "Usage-limit guard: reset time unknown — auto-resume will retry every 15 min. Log: $STATE_DIR/resume.log" >&2
   fi
@@ -199,7 +229,7 @@ case "$MODE" in
   report)
     [ -n "$SOURCE" ] || exit 0
     if [ "$PCT" -ge $((THRESHOLD - 20)) ]; then
-      echo "Usage-limit guard: ~${PCT}% of the 5-hour usage limit consumed (${SOURCE}; resets ~${RESET_HUMAN}). Per AGENTS.md, plan chunks so you can checkpoint before ${THRESHOLD}%."
+      echo "Usage-limit guard: ~${PCT}% of the 5-hour usage limit consumed (${SOURCE}; resets ~${RESET_HUMAN}). Plan your work so you can checkpoint cleanly before ${THRESHOLD}%."
     fi
     ;;
 
@@ -214,7 +244,7 @@ case "$MODE" in
         [ "$NOTIFIED" = "1" ] && jq -n --arg m "⏸ $PAUSE_MSG" '{systemMessage:$m}'
         exit 0 ;;
     esac
-    REASON="Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. Checkpoint now per AGENTS.md: update the active task file, PLAN, and Current Status (set Blocked by: 5-hour usage limit — resumes automatically at ${RESET_HUMAN}). Then end your reply with the pause message from the Usage-Limit Rule (stopping, why, and the resume time) and stop. Auto-resume is scheduled for ${RESET_HUMAN}."
+    REASON="Usage-limit guard: ~${PCT}% of the 5-hour usage limit is used (${SOURCE}; threshold ${THRESHOLD}%). Do not start new work. ${CHECKPOINT_HINT} Then end your reply with one line stating you're stopping, why, and the resume time (~${RESET_HUMAN}), and stop. Auto-resume is scheduled for ${RESET_HUMAN}."
     if [ "$NOTIFIED" = "1" ]; then
       jq -n --arg m "⏸ $PAUSE_MSG" --arg reason "$REASON" \
         '{systemMessage:$m, hookSpecificOutput:{hookEventName:"PreToolUse",permissionDecision:"deny",permissionDecisionReason:$reason}}'
